@@ -1197,7 +1197,7 @@ document.addEventListener('pointerdown',safePlay,{once:true});
 
 document.addEventListener('click',e=>{
 const el=e.target.closest(
-'[data-action],[data-intensity],[data-avatar],[data-baran],[data-vote]'
+'[data-action],[data-intensity],[data-gender],[data-avatar],[data-baran],[data-vote]'
 );
 
 if(!el)return;
