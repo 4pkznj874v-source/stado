@@ -2,7 +2,9 @@
 const app = document.querySelector('#app');
 const music = document.querySelector('#bgMusic');
 const A=['A','B','C','D','E'];
-const avatarSet=['🐑','🐏','🦙','🐑','🐏','🐑','🦙','🐑','🐏','🐑','🦙','🐑'];
+const avatarSet=Array.from({length:12},(_,i)=>
+`assets/avatars/female_${String(i+1).padStart(2,'0')}.png`
+);
 const palette=['pink','cyan','gold','violet','green'];
 const PUBLIC_URL='https://tinyurl.com/stadoowiec';
   const NICKNAMES={
@@ -119,7 +121,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&
 const roomCode=()=>Math.random().toString(36).slice(2,8).toUpperCase();
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const shuffle=a=>[...a].sort(()=>Math.random()-.5);
-const playerBy=id=>state.players.find(p=>p.id===id);
+const avatarImg=(src,cls='')=>`<img src="${src}" class="avatar-img ${cls}" alt="Owca">`;
 
 function answerCount(){const n=state.players.length;return n<=5?3:n<=8?4:5}
 function toast(t){document.body.insertAdjacentHTML('beforeend',`<div class="toast">${esc(t)}</div>`);setTimeout(()=>document.querySelector('.toast')?.remove(),2200)}
@@ -259,8 +261,8 @@ return shell(`
 <label class="label">Wybierz owcę</label>
 <div class="grid-3">
 ${avatarSet.map((a,i)=>`
-<button class="chip ${i===0?'active':''}" data-avatar="${i}">
-<span style="font-size:34px">${a}</span>
+<button class="chip avatar-choice ${i===0?'active':''}" data-avatar="${i}">
+${avatarImg(a)}
 </button>`).join('')}
 </div>
 
@@ -311,7 +313,7 @@ START (${state.players.length} owiec)
 
 function playerCard(p){
 return `<div class="player-card">
-<div class="avatar">${p.avatar}</div>
+<div class="avatar">${avatarImg(p.avatar)}</div>
 <div class="player-name">${esc(p.name)}</div>
 <div class="nickname">${esc(p.nickname)}</div>
 <div class="score">${p.score||0}</div>
@@ -348,7 +350,7 @@ ${g.wolfId?`<span class="badge">🐺 Wilk jest wśród was...</span>`:''}
 <div class="scoreboard">
 ${[...state.players].sort((a,b)=>b.score-a.score).map(p=>`
 <div class="score-pill">
-<span class="mini">${p.avatar}</span>
+<span class="mini">${avatarImg(p.avatar)}</span>
 <div>
 <b>${esc(p.name)}</b>
 <strong>${p.score} pkt</strong>
@@ -451,7 +453,7 @@ const ids=r.groups[i]||[];
 
 return `<div class="result-col ${r.majority.includes(i)?'winner':''}">
 <b>${A[i]} - ${ids.length} gł.</b>
-<div class="result-sheep">${ids.map(id=>playerBy(id)?.avatar||'🐑').join('')}</div>
+<div class="result-sheep">${ids.map(id=>avatarImg(playerBy(id)?.avatar)).join('')}</div>
 ${r.majority.includes(i)?'<div class="points-pop">WYBÓR STADA</div>':''}
 </div>`
 }).join('')}
@@ -469,7 +471,7 @@ if(!g)
 return shell(`
 <div class="phone-shell">
 <div class="phone-head">
-<div class="avatar">${p.avatar}</div>
+<div class="avatar">${avatarImg(p.avatar)}</div>
 <div>
 <b>${esc(p.name)}</b>
 <div class="nickname">${esc(p.nickname)}</div>
@@ -495,7 +497,7 @@ return shell(`
 <div class="phone-shell">
 
 <div class="phone-head">
-<div class="avatar">${p.avatar}</div>
+<div class="avatar">${avatarImg(p.avatar)}</div>
 <div>
 <b>${esc(p.name)}</b>
 <div class="nickname">${esc(p.nickname)}</div>
@@ -573,7 +575,7 @@ const max=Math.max(1,...Object.values(traits));
 
 const body=`
 <div class="profile-card">
-<div class="profile-icon">${p.avatar||'🐑'}</div>
+<div class="profile-icon">${avatarImg(p.avatar)}</div>
 <h2>${esc(p.name)} - ${esc(title)}</h2>
 <p>${esc(desc)}</p>
 <p><b>${p.score} punktów</b></p>
