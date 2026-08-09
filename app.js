@@ -431,7 +431,12 @@ ${g.stage==='results'?resultHTML(g):''}
 
 <div class="side-card">
 <h3>🧶 Żetony Wełny</h3>
-${state.players.map(p=>`<div>${p.avatar} ${esc(p.name)}: <b>${p.tokens}</b></div>`).join('')}
+${state.players.map(p=>`
+<div class="token-player">
+${avatarImg(p.avatar)}
+<span>${esc(p.name)}: <b>${p.tokens}</b></span>
+</div>
+`).join('')}
 </div>
 
 <div class="side-card controls-row">
