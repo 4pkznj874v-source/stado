@@ -128,6 +128,7 @@ const roomCode=()=>Math.random().toString(36).slice(2,8).toUpperCase();
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const shuffle=a=>[...a].sort(()=>Math.random()-.5);
 const avatarImg=(src,cls='')=>`<img src="${src}" class="avatar-img ${cls}" alt="Owca">`;
+  const playerBy=id=>state.players.find(p=>p.id===id);
 
 function answerCount(){
 return 5
