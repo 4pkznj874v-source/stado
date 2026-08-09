@@ -24,3 +24,57 @@ button,input,select{font:inherit}button{cursor:pointer}.hidden{display:none!impo
 .profile-card{max-width:760px;margin:20px auto;background:linear-gradient(155deg,#fff7df,#ffd9e6);color:#2b2140;border-radius:36px;padding:30px;text-align:center;border:5px solid #fff}.profile-icon{font-size:90px}.trait-bars{display:grid;gap:8px;margin-top:18px;text-align:left}.trait-row{display:grid;grid-template-columns:130px 1fr 40px;gap:8px;align-items:center}.bar{height:10px;border-radius:999px;background:#2b214018;overflow:hidden}.bar>i{display:block;height:100%;background:var(--pink);border-radius:inherit}
 @media(max-width:900px){.hero{grid-template-columns:1fr}.sheep-scene{height:330px}.game-layout{grid-template-columns:1fr}.side-panel{display:none}.scoreboard{overflow:auto}.question-stage{min-height:calc(100vh - 160px)}.answers{grid-template-columns:repeat(2,1fr)!important}.result-columns{grid-template-columns:repeat(2,1fr)!important}.grid-2,.grid-3{grid-template-columns:1fr}.app-shell{padding:10px}.topbar .brand{font-size:28px}}
 @media(max-width:520px){.hero-card{padding:22px;border-radius:26px}.sheep-scene{height:260px}.question-stage{padding:10px}.scenario{font-size:19px}.answers{grid-template-columns:1fr!important}.answer{min-height:auto}.phone-shell{border-radius:24px;min-height:calc(100vh - 20px);padding:14px}.topbar{align-items:flex-start}.scoreboard{display:none}}
+.avatar-img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+  border-radius:inherit;
+}
+
+.avatar-choice{
+  padding:4px;
+  overflow:hidden;
+  aspect-ratio:1/1;
+}
+
+.avatar-choice .avatar-img{
+  border-radius:14px;
+}
+
+.avatar{
+  width:64px;
+  height:64px;
+  overflow:hidden;
+  border-radius:50%;
+}
+
+.mini{
+  width:44px;
+  height:44px;
+  overflow:hidden;
+  border-radius:50%;
+  display:block;
+  flex:none;
+}
+
+.result-sheep{
+  display:flex;
+  justify-content:center;
+  gap:5px;
+  flex-wrap:wrap;
+}
+
+.result-sheep .avatar-img{
+  width:42px;
+  height:42px;
+  border-radius:50%;
+}
+
+.profile-icon{
+  width:120px;
+  height:120px;
+  margin:auto;
+  border-radius:50%;
+  overflow:hidden;
+}
