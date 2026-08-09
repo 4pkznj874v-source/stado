@@ -125,7 +125,11 @@ const avatarImg=(src,cls='')=>`<img src="${src}" class="avatar-img ${cls}" alt="
 
 function answerCount(){const n=state.players.length;return n<=5?3:n<=8?4:5}
 function toast(t){document.body.insertAdjacentHTML('beforeend',`<div class="toast">${esc(t)}</div>`);setTimeout(()=>document.querySelector('.toast')?.remove(),2200)}
-function safePlay(){music.volume=state.settings.volume;if(music.paused)music.play().catch(()=>{});}
+function safePlay(){
+if(state.mode==='join'||state.mode==='player')return;
+music.volume=state.settings.volume;
+if(music.paused)music.play().catch(()=>{});
+}
 function setMode(m){state.mode=m;render()}
 function broadcast(type,payload={}){state.connections.forEach(c=>{if(c.open)c.send({type,...payload})})}
 function send(c,type,payload={}){if(c?.open)c.send({type,...payload})}
@@ -806,6 +810,8 @@ state.players=m.players;
 state.game=m.game;
 state.settings=m.settings||state.settings;
 state.mode='player';
+music.pause();
+music.currentTime=0;
 render()
 }
 
@@ -1227,6 +1233,8 @@ render()
 }
 
 else if(action==='join'){
+music.pause();
+music.currentTime=0;
 state.mode='join';
 render()
 }
