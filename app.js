@@ -231,7 +231,7 @@ ${Object.keys(groupCategories()).map(c=>`
 <p><b>Baran +2</b> - przekona stado do swojej opcji.</p>
 <p><b>Wilk +3</b> - jego tajny cel wygra.</p>
 <p><b>Żeton Wełny +1</b> - poprawnie obstawisz większość.</p>
-<p>W połowie gry najsłabsze owce dostają dodatkowy żeton.</p>
+<p>W połowie gry najsłabsze owce dostają dodatkowy żeton wełny.</p>
 </div>
 </div>`)
 }
@@ -392,7 +392,7 @@ ${g.stage==='results'?resultHTML(g):''}
 </div>
 
 <div class="side-card">
-<h3>🧶 Żetony</h3>
+<h3>🧶 Żetony Wełny</h3>
 ${state.players.map(p=>`<div>${p.avatar} ${esc(p.name)}: <b>${p.tokens}</b></div>`).join('')}
 </div>
 
@@ -551,7 +551,7 @@ ${p.tokens>0&&me.tokenPrediction==null?`
 <div class="token-box">
 <b>🧶 Masz ${p.tokens} żeton(y) wełny.</b>
 <p>Możesz obstawić odpowiedź większości za +1 pkt.</p>
-<button data-action="token">POSTAW ŻETON</button>
+<button data-action="token">POSTAW ŻETON WEŁNY</button>
 </div>`:''}
 `:''}
 
@@ -1083,7 +1083,7 @@ p.tokens++;
 
 awards.push({
 icon:'🎁',
-text:`${p.name} dostaje żeton ratunkowy`
+text:`${p.name} dostaje Żeton Wełny`
 })
 })
 }
