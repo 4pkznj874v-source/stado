@@ -5,8 +5,114 @@ const A=['A','B','C','D','E'];
 const avatarSet=['🐑','🐏','🦙','🐑','🐏','🐑','🦙','🐑','🐏','🐑','🦙','🐑'];
 const palette=['pink','cyan','gold','violet','green'];
 const PUBLIC_URL='https://tinyurl.com/stadoowiec';
+  const NICKNAMES={
+female:[
+'Drama Queen',
+'Chaos Manager',
+'Plotkara Premium',
+'Królowa Prosecco',
+'Agentka Chaosu',
+'Królowa Afteru',
+'Cicha Manipulantka',
+'Owca ZERO Wstydu',
+'Imprezowa Księżniczka',
+'Królowa Czerwonych Flag',
+'Aktywistka Ostatniej Kolejki',
+'Producentka Nocnych Dramatów',
+'Architektka Ryzykownych Pomysłów',
+'Wizjonerka Bez Hamulców',
+'Archiwistka Cudzych Sekretów',
+'Diamentowa Owca Glamour',
+'Puchata Różowa Owca',
+'Rockowa Owca Dominatrix',
+'Neonowa Disco-Owca',
+'Złota Materialistka',
+'Niewinna Kokietka',
+'TikTokowa Intrygantka',
+'Słodka Uwodzicielka',
+'Waniliowa Degeneratka',
+'Mistrzyni Złego Timingu',
+'Cesarzowa Plot Twistów',
+'Ministerka Złych Decyzji',
+'Patronka Głupich Pomysłów',
+'Specjalistka od Exów',
+'Kolekcjonerka Red Flagów',
+'Pogromczyni Moralności',
+'Koneserka Toksycznych Relacji',
+'Ambasadorka Przypału',
+'Kierowniczka Melanżu',
+'Inspektorka Cudzych Telefonów',
+'Profesorka Flirtologii',
+'Doktorka Procent',
+'Kapłanka Ploteczek',
+'Baronowa Kaca',
+'Księżna Przypałów',
+'Matka Złych Rad',
+'CEO Głupich Decyzji',
+'Księgowa Cudzych Grzechów',
+'Komendantka Nocnych Akcji',
+'Patronka Moralnego Kaca',
+'Dyrektorka Spraw Beznadziejnych',
+'Audytorka Cudzych Związków',
+'Mistrzyni Przypadkowych Przygód',
+'Cesarzowa Tajnego Życia',
+'Specjalistka od Alibi'
+],
+male:[
+'Drama King',
+'Chaos Manager',
+'Plotkarz Premium',
+'Król Prosecco',
+'Agent Chaosu',
+'Król Afteru',
+'Cichy Manipulator',
+'Baran ZERO Wstydu',
+'Imprezowy Książę',
+'Król Czerwonych Flag',
+'Aktywista Ostatniej Kolejki',
+'Producent Nocnych Dramatów',
+'Architekt Ryzykownych Pomysłów',
+'Wizjoner Bez Hamulców',
+'Archiwista Cudzych Sekretów',
+'Diamentowy Baran Glamour',
+'Puchaty Różowy Baran',
+'Rockowy Baran Dominator',
+'Neonowy Disco-Baran',
+'Złoty Materialista',
+'Niewinny Flirciarz',
+'TikTokowy Intrygant',
+'Słodki Uwodziciel',
+'Waniliowy Degenerat',
+'Mistrz Złego Timingu',
+'Cesarz Plot Twistów',
+'Minister Złych Decyzji',
+'Patron Głupich Pomysłów',
+'Specjalista od Exów',
+'Kolekcjoner Red Flagów',
+'Pogromca Moralności',
+'Koneser Toksycznych Relacji',
+'Ambasador Przypału',
+'Kierownik Melanżu',
+'Inspektor Cudzych Telefonów',
+'Profesor Flirtologii',
+'Doktor Procent',
+'Kapłan Ploteczek',
+'Baron Kaca',
+'Książę Przypałów',
+'Ojciec Złych Rad',
+'CEO Głupich Decyzji',
+'Księgowy Cudzych Grzechów',
+'Komendant Nocnych Akcji',
+'Patron Moralnego Kaca',
+'Dyrektor Spraw Beznadziejnych',
+'Audytor Cudzych Związków',
+'Mistrz Przypadkowych Przygód',
+'Cesarz Tajnego Życia',
+'Specjalista od Alibi'
+]
+};
 const traitLabels={conformism:'Stadność',independence:'Niezależność',risk:'Ryzyko',chaos:'Chaos',empathy:'Empatia',dominance:'Dominacja',honesty:'Szczerość',hedonism:'Hedonizm',pragmatism:'Pragmatyzm',romance:'Romantyzm'};
-const state={mode:null,peer:null,conn:null,connections:new Map(),room:'',players:[],settings:{rounds:15,intensity:2,categories:['Impreza','Randki','Przyjaźń','Wstyd','Pieniądze','Praca','Wakacje','Moralne katastrofy','Absurd','Charakter'],volume:.28},game:null,me:null,settingsOpen:false};
+const state={mode:null,peer:null,conn:null,connections:new Map(),room:'',players:[],settings:{rounds:15,intensity:2,categories:['Impreza','Randki','Przyjaźń','Wstyd','Pieniądze','Praca','Wakacje','Moralne katastrofy','Absurd','Charakter'],volume:.28},game:null,me:null,settingsOpen:false,selectedGender:'female',selectedNickname:null};
 
 const uid=()=>Math.random().toString(36).slice(2,10);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -134,6 +240,7 @@ return o
 }
 
 function joinView(){
+  if(!state.selectedNickname) state.selectedNickname=pick(NICKNAMES[state.selectedGender]);
 const preset=new URLSearchParams(location.search).get('join')||'';
 return shell(`
 <div class="phone-shell">
@@ -144,7 +251,11 @@ return shell(`
 
 <label class="label">Twoje imię</label>
 <input id="nameInput" class="control" maxlength="18" placeholder="np. Marta">
-
+<label class="label">Wybierz płeć owcy</label>
+<div class="chips">
+<button class="chip ${state.selectedGender==='female'?'active':''}" data-gender="female">♀ Owieczka</button>
+<button class="chip ${state.selectedGender==='male'?'active':''}" data-gender="male">♂ Baran</button>
+</div>
 <label class="label">Wybierz owcę</label>
 <div class="grid-3">
 ${avatarSet.map((a,i)=>`
@@ -153,7 +264,7 @@ ${avatarSet.map((a,i)=>`
 </button>`).join('')}
 </div>
 
-<p class="nickname" id="nickPreview">${esc(STADO_NICKNAMES[0])}</p>
+<p class="nickname" id="nickPreview">${esc(state.selectedNickname)}</p>
 
 <div class="btn-row">
 <button class="primary" data-action="connect">DOŁĄCZ</button>
@@ -636,7 +747,8 @@ id:uid(),
 clientPeer:c.peer,
 name:m.name||'Owca',
 avatar:avatarSet[m.avatarIndex||0],
-nickname:m.nickname||pick(STADO_NICKNAMES),
+gender:m.gender||'female',
+nickname:m.nickname||pick(NICKNAMES[m.gender||'female']),
 score:0,
 tokens:1,
 traits:{},
@@ -678,7 +790,8 @@ safePlay();
 send(c,'join',{
 name,
 avatarIndex,
-nickname:pick(STADO_NICKNAMES)
+gender:state.selectedGender,
+nickname:state.selectedNickname
 })
 });
 
@@ -995,7 +1108,7 @@ id:'demo-'+uid(),
 clientPeer:null,
 name:['Marta','Ola','Kasia','Ania','Natalia','Zuza','Magda','Iga','Asia','Ewa'][i%10],
 avatar:avatarSet[i%avatarSet.length],
-nickname:STADO_NICKNAMES[i%STADO_NICKNAMES.length],
+nickname:NICKNAMES.female[i%NICKNAMES.female.length],
 score:0,
 tokens:1,
 traits:{},
@@ -1046,12 +1159,22 @@ render()
 document.addEventListener('pointerdown',safePlay,{once:true});
 
 document.addEventListener('click',e=>{
-const el=e.target.closest('[data-action],[data-intensity],[data-cat],[data-avatar],[data-baran],[data-vote]');
+const el=e.target.closest('[data-action],[data-intensity],[data-cat],[data-avatar],[data-baran],[data-vote],[data-gender]');
 
 if(!el)return;
 
 safePlay();
+if(el.dataset.gender){
+state.selectedGender=el.dataset.gender;
+state.selectedNickname=pick(NICKNAMES[state.selectedGender]);
 
+document.querySelectorAll('[data-gender]').forEach(x=>x.classList.remove('active'));
+el.classList.add('active');
+
+const preview=document.querySelector('#nickPreview');
+if(preview)preview.textContent=state.selectedNickname;
+return
+}
 if(el.dataset.intensity){
 state.settings.intensity=+el.dataset.intensity;
 render();
@@ -1075,7 +1198,8 @@ document.querySelectorAll('[data-avatar]')
 
 el.classList.add('active');
 
-document.querySelector('#nickPreview').textContent=pick(STADO_NICKNAMES);
+state.selectedNickname=pick(NICKNAMES[state.selectedGender]);
+document.querySelector('#nickPreview').textContent=state.selectedNickname;
 
 return
 }
