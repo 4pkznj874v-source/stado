@@ -1117,6 +1117,7 @@ render()
 }
 
 else if(action==='create-room'){
+state.mode='host';
 makePeerHost()
 }
 
