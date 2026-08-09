@@ -114,7 +114,13 @@ male:[
 ]
 };
 const traitLabels={conformism:'Stadność',independence:'Niezależność',risk:'Ryzyko',chaos:'Chaos',empathy:'Empatia',dominance:'Dominacja',honesty:'Szczerość',hedonism:'Hedonizm',pragmatism:'Pragmatyzm',romance:'Romantyzm'};
-const state={mode:null,peer:null,conn:null,connections:new Map(),room:'',players:[],settings:{rounds:15,intensity:2,categories:['Impreza','Randki','Przyjaźń','Wstyd','Pieniądze','Praca','Wakacje','Moralne katastrofy','Absurd','Charakter'],volume:.28},game:null,me:null,settingsOpen:false,selectedGender:'female',selectedNickname:null};
+const state={mode:null,peer:null,conn:null,connections:new Map(),room:'',players:[],settings:
+{
+  rounds:15,
+  intensity:2,
+  volume:.28
+}
+,game:null,me:null,settingsOpen:false,selectedGender:'female',selectedNickname:null};
 
 const uid=()=>Math.random().toString(36).slice(2,10);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -123,7 +129,9 @@ const pick=a=>a[Math.floor(Math.random()*a.length)];
 const shuffle=a=>[...a].sort(()=>Math.random()-.5);
 const avatarImg=(src,cls='')=>`<img src="${src}" class="avatar-img ${cls}" alt="Owca">`;
 
-function answerCount(){const n=state.players.length;return n<=5?3:n<=8?4:5}
+function answerCount(){
+return 5
+}
 function toast(t){document.body.insertAdjacentHTML('beforeend',`<div class="toast">${esc(t)}</div>`);setTimeout(()=>document.querySelector('.toast')?.remove(),2200)}
 function safePlay(){
 if(state.mode==='join'||state.mode==='player')return;
@@ -196,51 +204,81 @@ return `<div class="sheep ${cls}">
 }
 
 function setupView(){
-const cats=state.settings.categories;
 return shell(`
 <div class="grid-2">
+
 <div class="panel light">
+
 <h2 class="section-title">Ustaw grę</h2>
 
-<label class="label">Liczba rund: <b id="roundVal">${state.settings.rounds}</b></label>
-<input class="control" id="rounds" type="range" min="5" max="30" value="${state.settings.rounds}">
+<label class="label">
+Liczba rund:
+<b id="roundVal">${state.settings.rounds}</b>
+</label>
+
+<input
+class="control"
+id="rounds"
+type="range"
+min="5"
+max="30"
+value="${state.settings.rounds}"
+>
 
 <label class="label">Jak grubo gramy?</label>
-<div class="chips">
-${[[1,'🐑 Grzeczne stadko'],[2,'🍸 Po dwóch drinkach'],[3,'🔥 Bez hamulców']]
-.map(([v,t])=>`<button class="chip ${state.settings.intensity===v?'active':''}" data-intensity="${v}">${t}</button>`).join('')}
-</div>
 
-<label class="label">Kategorie</label>
 <div class="chips">
-${Object.keys(groupCategories()).map(c=>`
-<button class="chip ${cats.includes(c)?'active':''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
+
+${[
+[1,'🐑 Delikatne'],
+[2,'🍸 Po 2 drinkach'],
+[3,'🔥 Hardkorowe']
+].map(([v,t])=>`
+<button
+class="chip ${state.settings.intensity===v?'active':''}"
+data-intensity="${v}">
+${t}
+</button>
+`).join('')}
+
 </div>
 
 <div class="btn-row">
-<button class="primary" data-action="create-room">UTWÓRZ POKÓJ</button>
-<button class="secondary dark" data-action="home">Wróć</button>
+
+<button
+class="primary"
+data-action="create-room">
+UTWÓRZ POKÓJ
+</button>
+
+<button
+class="secondary dark"
+data-action="home">
+Wróć
+</button>
+
 </div>
+
 </div>
 
 <div class="panel">
+
 <h2 class="section-title">Jak działa runda?</h2>
+
 <p><b>+2</b> - idziesz za większością.</p>
 <p><b>+4</b> - jesteś jedyną Czarną Owcą.</p>
 <p><b>+1</b> - dokładnie dwie owce wybiorą niszową odpowiedź.</p>
 <p><b>Baran +2</b> - przekona stado do swojej opcji.</p>
 <p><b>Wilk +3</b> - jego tajny cel wygra.</p>
 <p><b>Żeton Wełny +1</b> - poprawnie obstawisz większość.</p>
-<p>W połowie gry najsłabsze owce dostają dodatkowy żeton wełny.</p>
+<p>W połowie gry najsłabsze owce dostają dodatkowy Żeton Wełny.</p>
+
 </div>
-</div>`)
+
+</div>
+`)
 }
 
-function groupCategories(){
-const o={};
-STADO_QUESTIONS.forEach(q=>o[q.category]=1);
-return o
-}
 
 function joinView(){
   if(!state.selectedNickname) state.selectedNickname=pick(NICKNAMES[state.selectedGender]);
@@ -844,15 +882,13 @@ toast(m.text)
 }
 
 function selectQuestions(){
-let pool=STADO_QUESTIONS.filter(q=>
-state.settings.categories.includes(q.category)&&
+
+const pool=STADO_QUESTIONS.filter(q=>
 q.intensity<=state.settings.intensity
 );
 
-if(pool.length<state.settings.rounds)
-pool=STADO_QUESTIONS.filter(q=>q.intensity<=state.settings.intensity);
+return shuffle(pool).slice(0,state.settings.rounds);
 
-return shuffle(pool).slice(0,state.settings.rounds)
 }
 
 function startGame(){
@@ -1160,7 +1196,9 @@ render()
 document.addEventListener('pointerdown',safePlay,{once:true});
 
 document.addEventListener('click',e=>{
-const el=e.target.closest('[data-action],[data-intensity],[data-cat],[data-avatar],[data-baran],[data-vote],[data-gender]');
+const el=e.target.closest(
+'[data-action],[data-intensity],[data-avatar],[data-baran],[data-vote]'
+);
 
 if(!el)return;
 
@@ -1178,17 +1216,6 @@ return
 }
 if(el.dataset.intensity){
 state.settings.intensity=+el.dataset.intensity;
-render();
-return
-}
-
-if(el.dataset.cat){
-const c=el.dataset.cat;
-
-state.settings.categories=state.settings.categories.includes(c)
-?state.settings.categories.filter(x=>x!==c)
-:[...state.settings.categories,c];
-
 render();
 return
 }
