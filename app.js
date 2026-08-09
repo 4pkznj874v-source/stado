@@ -163,7 +163,8 @@ ${avatarSet.map((a,i)=>`
 }
 
 function lobbyView(){
-const qr=`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(PUBLIC_URL)}`;
+const joinUrl=`${PUBLIC_URL}?join=${state.room}`;
+const qr=`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(joinUrl)}`;
 
 return shell(`
 <div class="panel">
