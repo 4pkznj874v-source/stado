@@ -68,7 +68,4 @@
   });
   window.STADO_QUESTIONS = qs.slice(0,300);
 
-  window.STADO_NICKNAMES = [
-    "Owca Podejrzanych Decyzji","Owca Po Trzecim Prosecco","Owca Bez Filtra","Owca Korporacyjna","Owca Romantyczna Katastrofa","Owca Niewinnego Spojrzenia","Owca Podwyższonego Ryzyka","Owca Złej Rady","Owca Cudzych Problemów","Owca Jednej Nocy","Owca Premium","Owca Po Godzinach","Owca Kontrolowanego Chaosu","Owca Nieczytająca Regulaminów","Owca Wiecznego Afteru","Owca Dobrej Wymówki","Owca Ostatniego Słowa","Owca Dramy Umiarkowanej","Owca Dzikiego Pomysłu","Owca Zbyt Szczera","Owca Wielkiego Wyjścia","Owca Różowych Okularów","Owca Bez Planu B","Owca Przypadkowej Mądrości","Owca Strategicznego Flirtu","Owca Przedłużonego Weekendu","Owca Podejrzanej Pewności Siebie","Owca Wysokich Standardów","Owca Niskiego Hamulca","Owca Złotych Myśli","Owca Trudnych Pytań","Owca Łatwych Odpowiedzi","Owca Nocnej Zmiany","Owca Jednego Drinka","Owca Dwóch Telefonów","Owca Bardzo Ważnych Spraw","Owca Niepotrzebnych Zakupów","Owca Dobrej Historii","Owca Niebezpiecznej Ciekawości","Owca Świętego Spokoju","Owca Wielkich Emocji","Owca Cichego Sabotażu","Owca Czystego Przypadku","Owca Bez Dowodów","Owca Tajnego Planu","Owca Wiecznej Racjonalizacji","Owca Mocnego Wejścia","Owca Miękkiego Lądowania","Owca Szybkiej Decyzji","Owca Drugiej Szansy"
-  ];
 })();
