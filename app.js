@@ -213,9 +213,6 @@ ${Object.keys(groupCategories()).map(c=>`
 <button class="chip ${cats.includes(c)?'active':''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
 </div>
 
-<label class="label">Głośność muzyki</label>
-<input class="control" id="volume" type="range" min="0" max="100" value="${Math.round(state.settings.volume*100)}">
-
 <div class="btn-row">
 <button class="primary" data-action="create-room">UTWÓRZ POKÓJ</button>
 <button class="secondary dark" data-action="home">Wróć</button>
@@ -701,10 +698,6 @@ state.settings.rounds=+e.target.value;
 document.querySelector('#roundVal').textContent=e.target.value
 });
 
-document.querySelector('#volume')?.addEventListener('input',e=>{
-state.settings.volume=e.target.value/100;
-music.volume=state.settings.volume
-});
 
 document.querySelector('#settingsVolume')?.addEventListener('input',e=>{
 state.settings.volume=e.target.value/100;
