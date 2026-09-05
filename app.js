@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.0.7";
+const APP_VERSION = "1.0.8";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -38,9 +38,19 @@ const LOCK_STORAGE_KEY = `stado:${pathKey}:hostlock`;
 
 const NETWORK = Object.assign({
   peerOptions: {},
-  iceServers: [{urls:"stun:stun.l.google.com:19302"}],
+  // Multiple STUN endpoints + TURN fallback. TURN matters for phones behind
+  // restrictive/symmetric NATs, where a direct WebRTC connection can fail.
+  iceServers: [
+    {urls:["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302"]},
+    {urls:"stun:stun.relay.metered.ca:80"},
+    {urls:"turn:openrelay.metered.ca:80",username:"openrelayproject",credential:"openrelayproject"},
+    {urls:"turn:openrelay.metered.ca:443",username:"openrelayproject",credential:"openrelayproject"},
+    {urls:"turn:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"}
+  ],
   heartbeatMs: 5000,
-  offlineAfterMs: 20000
+  offlineAfterMs: 20000,
+  joinWelcomeTimeoutMs: 9000,
+  joinRetryDelays: [600,1800,4000]
 }, window.STADO_NETWORK_CONFIG || {});
 
 const appEl = document.getElementById("app");
@@ -61,6 +71,7 @@ const runtime = {
     peer:null, conn:null, snapshot:null, roomInfo:null, identity:null, connected:false,
     lastPong:0, reconnectTimer:null, reconnectAttempt:0, heartbeat:null, pending:new Map(),
     joinDraft:{roomCode:"", name:"", sheepId:"", recover:false}, pendingJoin:null,
+    joinAttemptToken:"", joining:false, joinRetryAttempt:0, joinRetryTimer:null, joinWelcomeTimer:null,
     drafts:{question:"", answer:"", hardcoreType:"open", voteOptionId:"", useToken:false, huntTargetId:"", huntOptionId:""},
     waitingRecovery:false, reconnecting:false, lastAttemptId:null
   },
@@ -429,10 +440,11 @@ function makeRoom(config, roomCode, roomId){
   };
 }
 
-function makePlayer({name,sheepId,isBot=false,peerId=""}){
+function makePlayer({name,sheepId,isBot=false,peerId="",joinToken=""}){
   return {
     playerId:uid("p"), name:cleanText(name), normalizedName:normalizeName(name),
     sheepId:String(sheepId), isBot, active:true, removed:false, connected:isBot||!!peerId, peerId,
+    joinToken:isBot?"":String(joinToken||""),
     resumeKey:isBot?"":randomToken(24), sessionGeneration:0, joinedAt:Date.now(),
     points:0, tokens:1, replayReady:false, stats:makeStats()
   };
@@ -505,7 +517,20 @@ function createPeer(id){
 }
 function setupHostPeerHandlers(peer){
   peer.on("connection",acceptHostConnection);
-  peer.on("disconnected",()=>toast("Utracono sygnalizację PeerJS. Otwarte połączenia mogą nadal działać.","error"));
+  peer.on("disconnected",()=>{
+    toast("Chwilowo utracono serwer połączeń. Próbuję wznowić przyjmowanie Owiec…","error");
+    // Existing WebRTC data channels may keep working after signalling drops,
+    // but new players cannot join until the host reconnects to PeerServer.
+    let tries=0;
+    const retry=()=>{
+      if(runtime.host.peer!==peer || peer.destroyed || !peer.disconnected)return;
+      tries++;
+      try{peer.reconnect();}catch{}
+      if(peer.disconnected && tries<6)setTimeout(retry,Math.min(5000,500*tries));
+    };
+    setTimeout(retry,350);
+  });
+  peer.on("open",()=>{ if(runtime.host.room) render(); });
   peer.on("error",err=>toast(`Połączenie hosta: ${err?.type||err?.message||"błąd"}`,"error"));
 }
 
@@ -552,23 +577,45 @@ function roomInfoMessage(){
     occupiedSheep:activePlayers(r).filter(p=>!p.isBot).map(p=>p.sheepId), occupiedNames:activePlayers(r).map(p=>p.name), count:activePlayers(r).length, max:MAX_PLAYERS};
 }
 
+function sendWelcome(conn,pl,resumed=false){
+  const r=runtime.host.room;if(!r||!pl)return;
+  send(conn,{type:"WELCOME",resumed,identity:{playerId:pl.playerId,roomId:r.roomId,roomCode:r.roomCode,resumeKey:pl.resumeKey,sessionGeneration:pl.sessionGeneration},snapshot:buildPlayerSnapshot(pl.playerId)});
+}
+
 function hostJoin(conn,msg){
   const r=runtime.host.room;
   const payload=msg.payload||msg;
   if(!r || r.closed){send(conn,{type:"REJECT",code:"ROOM",message:"Pokój nie jest aktywny."});return;}
-  if(r.status!=="LOBBY"){send(conn,{type:"REJECT",code:"STARTED",message:"Gra już się rozpoczęła. Możesz tylko wrócić do istniejącej Owcy."});return;}
   if(payload.roomId && payload.roomId!==r.roomId){send(conn,{type:"REJECT",code:"ROOM_ID",message:"Ten link prowadzi do nieaktualnego pokoju."});return;}
-  const name=cleanText(payload.name), nn=normalizeName(name), sid=String(payload.sheepId||"");
+  const name=cleanText(payload.name), nn=normalizeName(name), sid=String(payload.sheepId||""), joinToken=String(payload.joinToken||"");
+
+  // A flaky phone may have reached the host, been added to the room and then
+  // missed WELCOME. The same joinToken lets the retry reclaim that exact sheep
+  // instead of getting stuck on NAME_TAKEN / SHEEP_TAKEN.
+  if(joinToken){
+    const existing=activePlayers(r).find(x=>!x.isBot&&x.joinToken===joinToken);
+    if(existing){
+      if(existing.normalizedName!==nn || existing.sheepId!==sid){send(conn,{type:"REJECT",code:"JOIN_MISMATCH",message:"Ta próba dołączenia dotyczy już innej Owcy. Odśwież stronę i spróbuj ponownie."});return;}
+      bindConnToPlayer(conn,existing);
+      sendWelcome(conn,existing,true);
+      commitHost("Ponowiono dołączenie Owcy");
+      return;
+    }
+  }
+
+  if(r.status!=="LOBBY"){send(conn,{type:"REJECT",code:"STARTED",message:"Gra już się rozpoczęła. Możesz tylko wrócić do istniejącej Owcy."});return;}
   if(!name || graphemeCount(name)>NAME_LIMIT){send(conn,{type:"REJECT",code:"NAME",message:"Podaj prawidłowe imię (maks. 20 znaków)."});return;}
   const sh=sheepById(sid);
   if(!sh || sh.id==="missing" || sh.selectable===false){send(conn,{type:"REJECT",code:"SHEEP",message:"Wybierz dostępną Owcę."});return;}
   if(activePlayers(r).length>=MAX_PLAYERS){send(conn,{type:"REJECT",code:"FULL",message:"To Stado jest już pełne — maksymalnie 12 Owiec."});return;}
   if(activePlayers(r).some(x=>x.normalizedName===nn)){send(conn,{type:"REJECT",code:"NAME_TAKEN",message:"Ta nazwa jest już zajęta."});return;}
   if(activePlayers(r).some(x=>!x.isBot&&x.sheepId===sid)){send(conn,{type:"REJECT",code:"SHEEP_TAKEN",message:"Ta Owca jest już zajęta — wybierz inną."});return;}
-  const pl=makePlayer({name,sheepId:sid,isBot:false,peerId:conn.peer});
+  const pl=makePlayer({name,sheepId:sid,isBot:false,peerId:conn.peer,joinToken});
   r.players.push(pl); bindConnToPlayer(conn,pl);
+  // Send identity first. If a network hiccup follows, the phone already has
+  // enough data to resume; commitHost then refreshes everyone in the lobby.
+  sendWelcome(conn,pl,false);
   commitHost("Nowa Owca dołączyła");
-  send(conn,{type:"WELCOME",identity:{playerId:pl.playerId,roomId:r.roomId,roomCode:r.roomCode,resumeKey:pl.resumeKey,sessionGeneration:pl.sessionGeneration},snapshot:buildPlayerSnapshot(pl.playerId)});
 }
 
 function bindConnToPlayer(conn,pl){
@@ -587,7 +634,7 @@ function hostResume(conn,msg){
   if(payload.resumeKey!==pl.resumeKey){send(conn,{type:"REJECT",code:"KEY",message:"Ten klucz powrotu nie jest już aktualny. Użyj „Wróć do swojej Owcy”."});return;}
   bindConnToPlayer(conn,pl);
   persistHost(); broadcastSnapshots();
-  send(conn,{type:"WELCOME",resumed:true,identity:{playerId:pl.playerId,roomId:r.roomId,roomCode:r.roomCode,resumeKey:pl.resumeKey,sessionGeneration:pl.sessionGeneration},snapshot:buildPlayerSnapshot(pl.playerId)});
+  sendWelcome(conn,pl,true);
 }
 
 function hostRecoveryRequest(conn,msg){
@@ -1098,7 +1145,9 @@ function commitHost(_reason=""){
 function broadcastSnapshots(){
   const r=runtime.host.room;if(!r)return;
   runtime.host.playerConns.forEach((conn,pid)=>{if(conn?.open)send(conn,{type:"SNAPSHOT",snapshot:buildPlayerSnapshot(pid)});});
-  // Unbound preview clients get refreshed occupancy only when they explicitly HELLO; no private state is broadcast.
+  // Keep people who are still on the join screen up to date. This avoids
+  // several phones selecting an avatar that another player has just taken.
+  runtime.host.conns.forEach(conn=>{if(conn?.open&&!conn.__playerId)send(conn,roomInfoMessage());});
 }
 function broadcast(msg){runtime.host.conns.forEach(conn=>{if(conn?.open)send(conn,msg);});}
 
@@ -1198,19 +1247,23 @@ function setupPlayerConn(conn,opts={}){
     startHeartbeat();
     send(conn,{type:"HELLO",protocolVersion:PROTOCOL_VERSION,appVersion:APP_VERSION});
     if(opts.resume)send(conn,{type:"RESUME",protocolVersion:PROTOCOL_VERSION,appVersion:APP_VERSION,payload:{...runtime.player.identity}});
-    if(opts.join&&runtime.player.pendingJoin)send(conn,{type:"JOIN",protocolVersion:PROTOCOL_VERSION,appVersion:APP_VERSION,payload:runtime.player.pendingJoin});
+    if(opts.join&&runtime.player.pendingJoin)sendPendingJoin(conn);
     if(opts.recover)send(conn,{type:"RECOVER_REQUEST",protocolVersion:PROTOCOL_VERSION,appVersion:APP_VERSION,payload:opts.recover});
     render();
   });
   conn.on("data",playerHandleMessage);
-  conn.on("close",()=>playerDisconnected(opts.preview));
-  conn.on("error",()=>playerDisconnected(opts.preview));
+  // Do not permanently mark a connection as "preview". The same DataConnection
+  // can now be promoted to the real player connection when DOŁĄCZ is pressed.
+  conn.on("close",()=>playerDisconnected(conn));
+  conn.on("error",()=>playerDisconnected(conn));
 }
 function playerHandleMessage(msg){
   if(!msg||typeof msg!=="object")return;
   if(msg.type==="PONG"){runtime.player.lastPong=Date.now();return;}
   if(msg.type==="ROOM_INFO"){runtime.player.roomInfo=msg;render();return;}
   if(msg.type==="WELCOME"){
+    clearJoinTimers();
+    runtime.player.joining=false;runtime.player.joinRetryAttempt=0;runtime.player.joinAttemptToken="";
     runtime.player.identity={...msg.identity,status:"active",drafts:runtime.player.drafts};runtime.player.snapshot=msg.snapshot;runtime.player.roomInfo=null;runtime.player.pendingJoin=null;
     setPlayerJoinURL(runtime.player.identity);persistPlayer();render();return;
   }
@@ -1227,16 +1280,22 @@ function playerHandleMessage(msg){
     runtime.player.waitingRecovery=false;if(msg.ok){runtime.player.identity={...msg.identity,status:"active",drafts:runtime.player.drafts};runtime.player.snapshot=msg.snapshot;setPlayerJoinURL(runtime.player.identity);persistPlayer();toast("Owca odzyskana.");}else toast(msg.message,"error");render();return;
   }
   if(msg.type==="REJECT"){
+    clearJoinTimers();runtime.player.joining=false;
     if(msg.code==="KEY"&&runtime.player.identity){runtime.player.identity.resumeKey="";persistPlayer();}
+    if(["SHEEP_TAKEN","NAME_TAKEN","FULL","ROOM_ID","STARTED","JOIN_MISMATCH"].includes(msg.code))runtime.player.joinAttemptToken="";
+    if(msg.code==="SHEEP_TAKEN")runtime.player.joinDraft.sheepId="";
     toast(msg.message||"Połączenie odrzucone.","error");render();return;
   }
   if(msg.type==="REMOVED"){clearPlayerIdentity();clearJoinURL();toast(msg.message||"Usunięto Cię z gry.","error");runtime.player.snapshot=null;runtime.player.roomInfo=null;render();return;}
   if(msg.type==="ROOM_CLOSED"){clearPlayerIdentity();clearJoinURL();runtime.player.snapshot=null;runtime.player.roomInfo=null;toast(msg.message||"Pokój został zamknięty.","error");render();return;}
 }
-function playerDisconnected(preview=false){
-  runtime.player.connected=false;stopHeartbeat();
-  if(preview){render();return;}
-  if(runtime.player.identity?.playerId){runtime.player.reconnecting=true;scheduleReconnect();}
+function playerDisconnected(conn=null){
+  const p=runtime.player;
+  // Ignore close/error events from a connection we intentionally replaced.
+  if(conn && p.conn!==conn)return;
+  p.connected=false;stopHeartbeat();
+  if(p.identity?.playerId){p.reconnecting=true;scheduleReconnect();}
+  else if(p.pendingJoin&&p.joining){scheduleJoinRetry();}
   render();
 }
 function startHeartbeat(){stopHeartbeat();runtime.player.heartbeat=setInterval(()=>{const p=runtime.player;if(p.conn?.open){send(p.conn,{type:"PING",ts:Date.now()});if(Date.now()-p.lastPong>NETWORK.offlineAfterMs){p.connected=false;p.reconnecting=true;render();}}},NETWORK.heartbeatMs);}
@@ -1252,16 +1311,57 @@ function startPlayerResume(force=false){
   peer.on("open",()=>{const conn=peer.connect(`stado-${id.roomCode}`,{reliable:true,serialization:"json"});p.conn=conn;setupPlayerConn(conn,{resume:true});});
   peer.on("error",()=>{p.connected=false;p.reconnecting=true;scheduleReconnect();render();});
 }
+function clearJoinTimers(){
+  const p=runtime.player;
+  clearTimeout(p.joinRetryTimer);clearTimeout(p.joinWelcomeTimer);
+  p.joinRetryTimer=null;p.joinWelcomeTimer=null;
+}
+function sendPendingJoin(conn=runtime.player.conn){
+  const p=runtime.player;if(!conn?.open||!p.pendingJoin)return false;
+  send(conn,{type:"JOIN",protocolVersion:PROTOCOL_VERSION,appVersion:APP_VERSION,payload:p.pendingJoin});
+  clearTimeout(p.joinWelcomeTimer);
+  p.joinWelcomeTimer=setTimeout(()=>{
+    if(!p.identity&&p.pendingJoin&&p.joining)scheduleJoinRetry();
+  },NETWORK.joinWelcomeTimeoutMs);
+  return true;
+}
+function scheduleJoinRetry(){
+  const p=runtime.player;if(p.identity||!p.pendingJoin||!p.joining)return;
+  clearTimeout(p.joinWelcomeTimer);clearTimeout(p.joinRetryTimer);
+  const delays=Array.isArray(NETWORK.joinRetryDelays)?NETWORK.joinRetryDelays:[800,2000,4500];
+  const n=p.joinRetryAttempt++;
+  if(n>=delays.length){
+    p.joining=false;p.joinRetryAttempt=0;
+    toast("Nie udało się połączyć z pokojem. Spróbuj ponownie — możesz też przełączyć Wi‑Fi/dane komórkowe.","error");render();return;
+  }
+  p.joinRetryTimer=setTimeout(()=>openJoinConnection(p.pendingJoin.roomCode),delays[n]);
+}
+function openJoinConnection(code){
+  const p=runtime.player;if(!p.pendingJoin||p.identity)return;
+  // Destroy only after the old connection has actually failed/timed out.
+  closePlayerNetwork(false);
+  const peer=createPeer();p.peer=peer;
+  peer.on("open",()=>{
+    if(p.peer!==peer||!p.pendingJoin)return;
+    const conn=peer.connect(`stado-${code}`,{reliable:true,serialization:"json"});p.conn=conn;setupPlayerConn(conn,{join:true});
+  });
+  peer.on("error",()=>{if(p.peer===peer&&p.pendingJoin&&p.joining)scheduleJoinRetry();});
+}
 function playerSubmitJoin(){
   const p=runtime.player,code=cleanRoomCode(p.joinDraft.roomCode),name=cleanText(p.joinDraft.name),sid=p.joinDraft.sheepId;
+  if(p.joining)return;
   if(code.length!==6){toast("Podaj 6-znakowy kod pokoju.","error");return;}
   if(!name||graphemeCount(name)>NAME_LIMIT){toast("Podaj imię — maksymalnie 20 znaków.","error");return;}
   if(!sid){toast("Wybierz swoją Owcę.","error");return;}
   const sh=sheepById(sid);if(!sh||sh.selectable===false){toast("Wybierz dostępną Owcę.","error");return;}
-  p.pendingJoin={roomCode:code,roomId:p.roomInfo?.roomId||p.joinDraft.roomId||"",name,sheepId:sid};
-  closePlayerNetwork(false);const peer=createPeer();p.peer=peer;
-  peer.on("open",()=>{const conn=peer.connect(`stado-${code}`,{reliable:true,serialization:"json"});p.conn=conn;setupPlayerConn(conn,{join:true});});
-  peer.on("error",()=>toast("Nie udało się połączyć z pokojem.","error"));
+  p.joinAttemptToken=p.joinAttemptToken||randomToken(12);
+  p.pendingJoin={roomCode:code,roomId:p.roomInfo?.roomId||p.joinDraft.roomId||"",name,sheepId:sid,joinToken:p.joinAttemptToken};
+  p.joining=true;p.joinRetryAttempt=0;clearJoinTimers();render();
+
+  // Best path: reuse the already-open preview WebRTC connection instead of
+  // destroying it and doing a second handshake while many people join at once.
+  if(p.conn?.open && p.roomInfo?.roomCode===code){sendPendingJoin(p.conn);return;}
+  openJoinConnection(code);
 }
 function playerRequestRecovery(){
   const p=runtime.player,code=cleanRoomCode(p.joinDraft.roomCode),name=cleanText(p.joinDraft.name);
@@ -1294,12 +1394,17 @@ function playerSubmitHunt(skip){
   playerSendAction(type,skip?{}:{targetPlayerId:p.drafts.huntTargetId,optionId:p.drafts.huntOptionId}).then(()=>{p.drafts.huntTargetId="";p.drafts.huntOptionId="";persistPlayer();});
 }
 function playerExitToMenu(){
-  confirmModal("Opuścić widok gry?","Nie usuwa to Twojej Owcy z aktywnego meczu. Możesz później wrócić tym samym telefonem.",()=>{closePlayerNetwork(false);clearJoinURL();runtime.role="start";runtime.player.snapshot=null;runtime.player.roomInfo=null;render();});
+  confirmModal("Opuścić widok gry?","Nie usuwa to Twojej Owcy z aktywnego meczu. Możesz później wrócić tym samym telefonem.",()=>{clearJoinTimers();runtime.player.joining=false;runtime.player.pendingJoin=null;runtime.player.joinAttemptToken="";closePlayerNetwork(false);clearJoinURL();runtime.role="start";runtime.player.snapshot=null;runtime.player.roomInfo=null;render();});
 }
 function closePlayerNetwork(clear=true){
-  stopHeartbeat();clearTimeout(runtime.player.reconnectTimer);runtime.player.reconnectTimer=null;
-  try{runtime.player.conn?.close();}catch{}try{runtime.player.peer?.destroy();}catch{}
-  runtime.player.conn=null;runtime.player.peer=null;runtime.player.connected=false;if(clear)runtime.player.roomInfo=null;
+  const p=runtime.player;
+  stopHeartbeat();clearTimeout(p.reconnectTimer);p.reconnectTimer=null;
+  const oldConn=p.conn,oldPeer=p.peer;
+  // Detach them from runtime before closing so their asynchronous close/error
+  // callbacks cannot start a second reconnect/join attempt.
+  p.conn=null;p.peer=null;p.connected=false;
+  try{oldConn?.close();}catch{}try{oldPeer?.destroy();}catch{}
+  if(clear)p.roomInfo=null;
 }
 function clearPlayerIdentity(){localStorage.removeItem(PLAYER_STORAGE_KEY);runtime.player.identity=null;}
 function persistPlayer(){try{if(runtime.player.identity){runtime.player.identity.drafts=runtime.player.drafts;localStorage.setItem(PLAYER_STORAGE_KEY,JSON.stringify(runtime.player.identity));}}catch{}}
@@ -1570,7 +1675,7 @@ function renderJoin(){
     <label class="form-label" style="margin-top:12px">Twoje imię</label><input class="input" data-field="playerName" value="${escAttr(p.joinDraft.name)}" placeholder="Np. Mati" autocomplete="off">
     ${info?`<p class="${info.status==="LOBBY"?"success-text":"error-text"}">${info.status==="LOBBY"?`Pokój znaleziony • ${info.count}/${info.max} Owiec`:`Gra już wystartowała — możesz tylko wrócić do swojej Owcy.`}</p>`:`<p class="muted small">Po wpisaniu pełnego kodu sprawdzimy pokój.</p>`}
     <h2>Wybierz swoją Owcę</h2><div class="big-sheep-list">${selectable.map(sh=>{const taken=occupied.has(String(sh.id)),sel=p.joinDraft.sheepId===String(sh.id);return `<button class="big-sheep-card ${taken?"taken":""} ${sel?"selected":""}" data-action="select-sheep" data-id="${escAttr(sh.id)}" ${taken?"disabled":""}>${imgHTML(sh.bigAvatar,sh.name)}${taken?`<span class="taken-label">ZAJĘTA</span>`:""}<div class="caption"><strong>${esc(sh.name)}</strong><p>${esc(sh.description||"")}</p></div></button>`;}).join("")}</div>
-    <div class="sticky-action"><button class="btn" data-action="submit-join" ${info&&info.status!=="LOBBY"?"disabled":""}>DOŁĄCZ</button></div>
+    <div class="sticky-action"><button class="btn" data-action="submit-join" ${p.joining||(info&&info.status!=="LOBBY")?"disabled":""}>${p.joining?"ŁĄCZENIE…":"DOŁĄCZ"}</button></div>
     <div class="hint-box" style="margin-top:14px"><b>Telefon się zmienił albo straciłeś dane powrotu?</b><br><button class="btn ghost" data-action="toggle-recover">Wróć do swojej Owcy</button>${p.joinDraft.recover?`<div class="stack" style="margin-top:10px"><p class="small muted">Wpisz kod i dokładnie to samo imię. Prowadzący zatwierdzi przejęcie Owcy na tym urządzeniu.</p><button class="btn cyan" data-action="submit-recover" ${p.waitingRecovery?"disabled":""}>${p.waitingRecovery?"Czekamy na prowadzącego…":"WYŚLIJ PROŚBĘ"}</button></div>`:""}</div>
   </section></main>`;
 }
