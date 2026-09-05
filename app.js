@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.0.3";
+const APP_VERSION = "1.0.4";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -156,6 +156,35 @@ function handleClick(e){
   }
   if(a === "open-settings"){ runtime.modal = {type:"settings"}; render(); return; }
   if(a === "close-modal"){ runtime.modal = null; render(); return; }
+
+  if(a === "settings-new-game"){
+    if(!runtime.host.room) return;
+    const inProgress = !!runtime.host.room.match && !runtime.host.room.match.finalized;
+    confirmModal(
+      "Ustawić grę od nowa?",
+      inProgress
+        ? "Bieżąca rozgrywka zostanie przerwana. Punkty, żetony i postęp meczu zostaną wyzerowane, ale obecny pokój i dołączone Owce pozostaną. Wrócisz do ustawień gry."
+        : "Punkty, żetony i poprzedni wynik zostaną wyzerowane. Pokój i dołączone Owce pozostaną. Wrócisz do ustawień gry.",
+      hostNewGame
+    );
+    return;
+  }
+
+  if(a === "settings-exit-menu"){
+    if(!runtime.host.room){
+      runtime.modal=null;
+      runtime.role="start";
+      pauseAllMusic();
+      render();
+      return;
+    }
+    confirmModal(
+      "Wyjść do menu głównego?",
+      "Pokój zostanie zamknięty, telefony graczy zostaną rozłączone i bieżąca gra zostanie zakończona. Potem możesz utworzyć całkiem nową grę.",
+      hostCloseRoom
+    );
+    return;
+  }
 
   if(a === "mode"){ runtime.configDraft.mode = value; render(); return; }
   if(a === "answer-count"){ runtime.configDraft.answerCountRequested = +value; render(); return; }
@@ -1639,7 +1668,7 @@ function renderSettingsModal(){
   if(runtime.role==="player")return `<div class="modal card"><h2>⚙ Ustawienia telefonu</h2><div class="info-list"><div class="info-item">Połączenie: <b>${runtime.player.connected?"online":"offline"}</b></div><div class="info-item">Telefon gracza nie odtwarza muzyki ani efektów dźwiękowych.</div></div><div class="modal-actions"><button class="btn secondary" data-action="player-reconnect">Połącz ponownie</button><button class="btn ghost" data-action="player-menu">Wyjdź do menu</button><button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
   const r=runtime.host.room;
   const volume=Math.round(runtime.audio.volume*100);
-  return `<div class="modal card"><h2>⚙ Ustawienia</h2><label class="form-label">Głośność muzyki</label><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1"><label class="row" style="margin-top:10px"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label>${r?`<div class="info-item" style="margin-top:14px"><b>Pokój ${esc(r.roomCode)}</b><div id="settingsQR" data-qr="${escAttr(joinURL(r))}" style="width:150px;height:150px;background:#fff;padding:8px;border-radius:12px;margin:10px auto"></div><div class="small center muted">Zeskanuj, aby wrócić do pokoju.</div></div><div class="manage-list">${activePlayers(r).map(p=>`<div class="manage-row">${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))} • ${p.connected||p.isBot?"online":"offline"}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}">Usuń</button></div>`).join("")}</div>`:""}<div class="modal-actions">${r&&["ROUND","PROLOGUE"].includes(r.status)?`<button class="btn secondary" data-action="pause">${r.paused?"Wznów":"Pauza"}</button>`:""}${r&&r.status==="ROUND"&&r.match?.current&&!r.match.current.settlement?`<button class="btn secondary" data-action="abort-round">Pomiń pytanie</button>`:""}${r&&r.match&&!r.match.finalized?`<button class="btn danger" data-action="end-game">Zakończ grę</button>`:""}<button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
+  return `<div class="modal card"><h2>⚙ Ustawienia</h2><label class="form-label">Głośność muzyki</label><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1"><label class="row" style="margin-top:10px"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label>${r?`<div class="info-item" style="margin-top:14px"><b>Pokój ${esc(r.roomCode)}</b><div id="settingsQR" data-qr="${escAttr(joinURL(r))}" style="width:150px;height:150px;background:#fff;padding:8px;border-radius:12px;margin:10px auto"></div><div class="small center muted">Zeskanuj, aby wrócić do pokoju.</div></div><div class="manage-list">${activePlayers(r).map(p=>`<div class="manage-row">${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))} • ${p.connected||p.isBot?"online":"offline"}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}">Usuń</button></div>`).join("")}</div>`:""}<div class="modal-actions">${r&&["ROUND","PROLOGUE"].includes(r.status)?`<button class="btn secondary" data-action="pause">${r.paused?"Wznów":"Pauza"}</button>`:""}${r&&r.status==="ROUND"&&r.match?.current&&!r.match.current.settlement?`<button class="btn secondary" data-action="abort-round">Pomiń pytanie</button>`:""}${r?`<button class="btn yellow" data-action="settings-new-game">↻ USTAW GRĘ OD NOWA</button>`:""}${r?`<button class="btn danger" data-action="settings-exit-menu">WYJDŹ DO MENU GŁÓWNEGO</button>`:""}<button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
 }
 function afterModalRender(){document.querySelectorAll("[data-qr]").forEach(renderQRNode);}
 
