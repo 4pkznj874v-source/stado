@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.0.14";
+const APP_VERSION = "1.0.17";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -107,6 +107,7 @@ function init(){
     if(savedPlayer && savedPlayer.roomCode === qCode && savedPlayer.playerId && savedPlayer.resumeKey && savedPlayer.status !== "closed"){
       runtime.player.identity = savedPlayer;
       if(savedPlayer.drafts) runtime.player.drafts = {...runtime.player.drafts,...savedPlayer.drafts};
+      runtime.player.lastAttemptId = savedPlayer.lastAttemptId || null;
       render();
       startPlayerResume();
       return;
@@ -130,7 +131,7 @@ function bindGlobalEvents(){
   document.addEventListener("click", handleClick);
   document.addEventListener("input", handleInput);
   document.addEventListener("change", handleChange);
-  window.addEventListener("resize",()=>requestAnimationFrame(()=>{fitHostAnswerText();updateCountdownNodes();}));
+  window.addEventListener("resize",()=>requestAnimationFrame(()=>{fitHostAnswerText();fitWhichSheepCards();updateCountdownNodes();}));
   document.addEventListener("visibilitychange",()=>{if(!document.hidden)kickPlayerReconnect();});
   window.addEventListener("pageshow",()=>kickPlayerReconnect());
   window.addEventListener("online",()=>kickPlayerReconnect());
@@ -1420,6 +1421,21 @@ function setupPlayerConn(conn,opts={}){
     });
   }
 }
+function keepActiveEditorOnSnapshot(nextSnapshot){
+  // iOS/Safari zamyka klawiature, gdy podczas pisania podmienimy caly DOM.
+  // Snapshoty od hosta przychodza m.in. wtedy, gdy inni gracze koncza swoje akcje.
+  // Jesli dla tej Owcy nadal trwa dokladnie ten sam etap pisania, aktualizujemy
+  // stan w tle bez renderowania ekranu i pozostawiamy textarea/fokus bez zmian.
+  const field=document.activeElement?.dataset?.draft;
+  if(field!=="question"&&field!=="answer")return false;
+  const prev=runtime.player.snapshot,prevC=prev?.match?.current,nextC=nextSnapshot?.match?.current;
+  if(!prevC||!nextC||prev?.status!=="ROUND"||nextSnapshot?.status!=="ROUND")return false;
+  if(!!prev.paused!==!!nextSnapshot.paused)return false;
+  if(prevC.attemptId!==nextC.attemptId||prevC.phase!==nextC.phase)return false;
+  if(field==="question")return nextC.phase==="QUESTION_INPUT"&&!!nextC.isRam;
+  return nextC.phase==="ANSWER_INPUT"&&!!nextC.isAuthor&&!nextC.myAnswer;
+}
+
 function playerHandleMessage(msg){
   if(!msg||typeof msg!=="object")return;
   if(msg.type==="PONG"){runtime.player.lastPong=Date.now();return;}
@@ -1432,9 +1448,16 @@ function playerHandleMessage(msg){
     setPlayerJoinURL(runtime.player.identity);persistPlayer();render();return;
   }
   if(msg.type==="SNAPSHOT"){
+    const keepEditor=keepActiveEditorOnSnapshot(msg.snapshot);
     runtime.player.snapshot=msg.snapshot;
-    if(runtime.player.identity){runtime.player.identity.status="active";runtime.player.identity.drafts=runtime.player.drafts;persistPlayer();}
-    syncDraftsToSnapshot();render();return;
+    syncDraftsToSnapshot();
+    if(runtime.player.identity){runtime.player.identity.status="active";persistPlayer();}
+    if(keepEditor){
+      // Nie ruszamy DOM-u pola tekstowego: klawiatura i kursor zostaja na miejscu.
+      updateCountdownNodes();
+      return;
+    }
+    render();return;
   }
   if(msg.type==="ACK"){
     const pend=runtime.player.pending.get(msg.actionId);if(pend){runtime.player.pending.delete(msg.actionId);if(msg.ok){pend.resolve?.(msg);toast(msg.message||"Zapisano.");}else{pend.reject?.(msg);toast(msg.message||"Nie udało się zapisać.","error");}render();}return;
@@ -1637,20 +1660,27 @@ function closePlayerNetwork(clear=true){
   if(clear)p.roomInfo=null;
 }
 function clearPlayerIdentity(){localStorage.removeItem(PLAYER_STORAGE_KEY);runtime.player.identity=null;}
-function persistPlayer(){try{if(runtime.player.identity){runtime.player.identity.drafts=runtime.player.drafts;localStorage.setItem(PLAYER_STORAGE_KEY,JSON.stringify(runtime.player.identity));}}catch{}}
+function persistPlayer(){try{if(runtime.player.identity){runtime.player.identity.drafts=runtime.player.drafts;runtime.player.identity.lastAttemptId=runtime.player.lastAttemptId||null;localStorage.setItem(PLAYER_STORAGE_KEY,JSON.stringify(runtime.player.identity));}}catch{}}
 function syncDraftsToSnapshot(){
   const c=runtime.player.snapshot?.match?.current;if(!c)return;
-  // Każda nowa próba/runda musi wystartować z czystym wyborem głosu, żetonu i polowania.
-  // Bez tego snapshot poprzedniej rundy mógł zostawić useToken=true lub stare optionId.
+  // Drafty tekstowe i wyborowe są przypisane do konkretnej próby/rundy.
+  // Przy przejściu do nowej próby czyścimy je wszystkie, aby poprzednia
+  // odpowiedź/pytanie nie pojawiały się ponownie w nowym formularzu.
+  // lastAttemptId jest zapisywany lokalnie, więc zwykły reconnect w TRAKCIE
+  // tej samej próby nadal zachowuje niedokończony tekst użytkownika.
   if(runtime.player.lastAttemptId!==c.attemptId){
     runtime.player.lastAttemptId=c.attemptId;
+    runtime.player.drafts.question="";
+    runtime.player.drafts.answer="";
     runtime.player.drafts.voteOptionId="";
     runtime.player.drafts.useToken=false;
     runtime.player.drafts.huntTargetId="";
     runtime.player.drafts.huntOptionId="";
   }
   if(c.myVote){runtime.player.drafts.voteOptionId=c.myVote.optionId;runtime.player.drafts.useToken=!!c.myVote.useToken;}
-  if(c.myAnswer)runtime.player.drafts.answer=c.myAnswer;
+  // Po zaakceptowaniu odpowiedzi nie trzymamy jej jako draftu. Serwer i tak
+  // przechowuje ją w c.myAnswer, a formularz nie jest już edytowalny.
+  if(c.myAnswer)runtime.player.drafts.answer="";
   if(c.myWolfDecision&&!c.myWolfDecision.skip){runtime.player.drafts.huntTargetId=c.myWolfDecision.targetPlayerId;runtime.player.drafts.huntOptionId=c.myWolfDecision.optionId;}
 }
 
@@ -1789,7 +1819,7 @@ function renderHostGame(r){
     <header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span>${countdownHTML(c)}<span class="badge pink">${modeIcon(r.config.mode)} ${esc(mode.label)}</span>${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 Baran: ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
     <section class="host-grid">
       <aside class="host-side host-left"><div class="host-panel"><h3>Owce: ${aps.length}/${MAX_PLAYERS} <span class="small muted">• ranking</span></h3></div><div class="host-panel"><div class="host-player-list" style="--players:${Math.max(aps.length,1)};--host-avatar:${hostAvatarPx}px">${scoreboard.map(p=>renderHostPlayer(p,c)).join("")}</div></div></aside>
-      <main class="host-center">
+      <main class="host-center ${phase==="RESULT"?"has-result":""}">
         <div class="main-scene"><img src="assets/scenes/glowne.png" alt="STADO — główna scena"></div>
         ${renderHostQuestion(c,r)}
         <div class="answer-area">${renderHostAnswerArea(c,r)}</div>
@@ -1948,11 +1978,15 @@ function renderPhoneRound(s){
   if(c.phase==="NO_QUESTIONS")return rp+renderPhoneWait("Brak kolejnego pytania","Prowadzący zdecyduje, co dalej.","assets/phone/czekatel.png");
   return rp+renderPhoneWait("Czekamy na przygotowanie rundy…","Spójrz na ekran główny.","assets/phone/czekatel.png");
 }
+function questionWritingGuide(type){
+  if(type==="which_sheep")return `<div class="writing-guide"><b>💡 Jak napisać dobre „Która Owca?”</b><div class="small">Krótka, konkretna sytuacja, w której naturalnie da się wskazać jedną osobę ze Stada.</div><div class="writing-examples"><span>„Kto pierwszy zasnąłby na własnej imprezie?”</span><span>„Kto kupiłby coś kompletnie niepotrzebnego?”</span><span>„Kto zniknąłby bez pożegnania?”</span></div></div>`;
+  return `<div class="writing-guide"><b>💡 Jak napisać dobre pytanie otwarte?</b><div class="small">Daj Stadu sytuację z kilkoma możliwymi, zabawnymi odpowiedziami. Nie sugeruj jednej oczywistej odpowiedzi.</div><div class="writing-examples"><span>„Stado budzi się w obcym mieście. Co robi jako pierwsze?”</span><span>„Co jest najgorszym tekstem na pierwszej randce?”</span><span>„Co Stado zabiera na bezludną wyspę?”</span></div></div>`;
+}
 function renderQuestionAuthor(c,s){
   const d=runtime.player.drafts;
-  return `<div class="author-box"><h2>🐏 Jesteś Baranem!</h2><p>Wybierz rodzaj pytania, a potem wpisz własne pytanie.</p><div class="choice-row"><button class="choice ${d.hardcoreType==="which_sheep"?"active":""}" data-action="hardcore-type" data-value="which_sheep">🐑 Która Owca?</button><button class="choice ${d.hardcoreType!=="which_sheep"?"active":""}" data-action="hardcore-type" data-value="open">📝 Pytanie otwarte</button></div><div class="hint-box" style="margin-top:12px">${d.hardcoreType==="which_sheep"?"Odpowiedziami będą wszystkie Owce w grze.":"Wybrane Owce przygotują odpowiedzi. Możesz sam wpisać w pytaniu imię konkretnej Owcy."}</div><label class="form-label" style="margin-top:14px">Wpisz pytanie</label><textarea class="textarea" data-draft="question" placeholder="Napisz pytanie do Stada…">${esc(d.question)}</textarea><div id="questionCount" class="char-count">${graphemeCount(d.question)}/200</div><div class="sticky-action"><button class="btn" data-action="submit-question">ZATWIERDŹ PYTANIE</button></div></div>`;
+  return `<div class="author-box"><h2>🐏 Jesteś Baranem!</h2><p>Wybierz rodzaj pytania, a potem wpisz własne pytanie.</p><div class="choice-row"><button class="choice ${d.hardcoreType==="which_sheep"?"active":""}" data-action="hardcore-type" data-value="which_sheep">🐑 Która Owca?</button><button class="choice ${d.hardcoreType!=="which_sheep"?"active":""}" data-action="hardcore-type" data-value="open">📝 Pytanie otwarte</button></div><div class="hint-box" style="margin-top:12px">${d.hardcoreType==="which_sheep"?"Odpowiedziami będą wszystkie Owce w grze.":"Wybrane Owce przygotują odpowiedzi. Możesz sam wpisać w pytaniu imię konkretnej Owcy."}</div>${questionWritingGuide(d.hardcoreType)}<label class="form-label" style="margin-top:14px">Wpisz pytanie</label><textarea class="textarea author-textarea" data-draft="question" placeholder="Napisz pytanie do Stada…" autocomplete="off" autocapitalize="sentences" spellcheck="true">${esc(d.question)}</textarea><div id="questionCount" class="char-count">${graphemeCount(d.question)}/200</div><div class="author-submit"><button class="btn" data-action="submit-question">ZATWIERDŹ PYTANIE</button><div class="small muted center">Po zatwierdzeniu pytania nie można już edytować.</div></div></div>`;
 }
-function renderAnswerAuthor(c,s){const d=runtime.player.drafts;return `<div class="author-box"><h2>✍️ Czas na Twoją odpowiedź!</h2><p class="muted">Twoja odpowiedź będzie anonimowa do momentu pokazania wyników.</p><div class="phone-question">${esc(c.questionText)}</div><label class="form-label">Wpisz swoją odpowiedź</label><textarea class="textarea" data-draft="answer" placeholder="Napisz coś, co może przekonać Stado…">${esc(d.answer)}</textarea><div id="answerCount" class="char-count">${graphemeCount(d.answer)}/200</div><div class="sticky-action"><button class="btn cyan" data-action="submit-answer">ZATWIERDŹ ODPOWIEDŹ</button></div></div>`;}
+function renderAnswerAuthor(c,s){const d=runtime.player.drafts;return `<div class="author-box"><h2>✍️ Czas na Twoją odpowiedź!</h2><p class="muted">Twoja odpowiedź będzie anonimowa do momentu pokazania wyników.</p><div class="phone-question">${esc(c.questionText)}</div><label class="form-label">Wpisz swoją odpowiedź</label><textarea class="textarea author-textarea" data-draft="answer" placeholder="Napisz coś, co może przekonać Stado…" autocomplete="off" autocapitalize="sentences" spellcheck="true">${esc(d.answer)}</textarea><div id="answerCount" class="char-count">${graphemeCount(d.answer)}/200</div><div class="author-submit"><button class="btn cyan" data-action="submit-answer">ZATWIERDŹ ODPOWIEDŹ</button><div class="small muted center">Po zatwierdzeniu odpowiedzi nie można już edytować.</div></div></div>`;}
 function renderVoting(c,s){return `<div><div class="phone-question">${esc(c.questionText)}</div>${c.type==="which_sheep"?renderPhoneSheepOptions(c,s):renderPhoneTextOptions(c)}${renderTokenChooser(s)}<div class="sticky-action"><button class="btn" data-action="submit-vote" ${runtime.player.drafts.voteOptionId?"":"disabled"}>ZATWIERDŹ</button></div><p class="muted small center">Do kliknięcia „Zatwierdź” możesz zmienić wybór i decyzję o Żetonie Wełny.</p></div>`;}
 function renderPhoneTextOptions(c){return `<div class="phone-answer-list">${c.options.map((o,i)=>`<button class="phone-answer ${COLORS[i]?.key||o.colorKey} ${runtime.player.drafts.voteOptionId===o.optionId?"selected":""}" data-action="select-vote" data-id="${o.optionId}">${COLORS[i]?.letter||o.letter} — ${esc(o.text)}</button>`).join("")}</div>`;}
 function renderPhoneSheepOptions(c,s){return `<div class="phone-sheep-grid">${c.options.map(o=>{const p=s.players.find(x=>x.playerId===o.candidatePlayerId),sh=sheepById(p?.sheepId);return `<button class="phone-sheep-option ${runtime.player.drafts.voteOptionId===o.optionId?"selected":""}" data-action="select-vote" data-id="${o.optionId}">${imgHTML(sh.smallAvatar,sh.name)}<strong>${esc(p?.name||"Owca")}</strong><small>${esc(sh.name)}</small></button>`;}).join("")}</div>`;}
@@ -2044,7 +2078,29 @@ function afterRender(){
   if(runtime.role==="host"){
     requestWakeLock();
     fitHostAnswerText();
+    fitWhichSheepCards();
   }
+}
+function fitWhichSheepCards(){
+  document.querySelectorAll(".which-grid").forEach(grid=>{
+    const isResult=grid.classList.contains("result");
+    const preferred=parseFloat(getComputedStyle(grid).getPropertyValue("--which-avatar"))||96;
+    grid.querySelectorAll(".sheep-option").forEach(card=>{
+      const img=card.querySelector("img");
+      if(!img||!card.clientWidth||!card.clientHeight)return;
+      const minSize=isResult?38:48;
+      let size=Math.min(preferred,card.clientWidth*.48,card.clientHeight*(isResult?.42:.62));
+      size=Math.max(minSize,size);
+      img.style.width=`${size}px`;img.style.height=`${size}px`;
+      for(let i=0;i<14 && card.scrollHeight>card.clientHeight+1 && size>minSize;i++){
+        size=Math.max(minSize,size-4);
+        img.style.width=`${size}px`;img.style.height=`${size}px`;
+      }
+      if(isResult && card.scrollHeight>card.clientHeight+1){
+        card.classList.add("compact-result");
+      }else card.classList.remove("compact-result");
+    });
+  });
 }
 function fitHostAnswerText(){
   document.querySelectorAll(".answer-card .answer-text").forEach(text=>{
