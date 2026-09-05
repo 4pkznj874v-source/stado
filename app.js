@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.0.4";
+const APP_VERSION = "1.0.5";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -62,7 +62,7 @@ const runtime = {
     lastPong:0, reconnectTimer:null, reconnectAttempt:0, heartbeat:null, pending:new Map(),
     joinDraft:{roomCode:"", name:"", sheepId:"", recover:false}, pendingJoin:null,
     drafts:{question:"", answer:"", hardcoreType:"open", voteOptionId:"", useToken:false, huntTargetId:"", huntOptionId:""},
-    waitingRecovery:false, reconnecting:false
+    waitingRecovery:false, reconnecting:false, lastAttemptId:null
   },
   audio: {track:0, volume:.35, muted:false, pausedByGame:false},
   data: normalizeQuestionData(rawQuestions),
@@ -1305,6 +1305,15 @@ function clearPlayerIdentity(){localStorage.removeItem(PLAYER_STORAGE_KEY);runti
 function persistPlayer(){try{if(runtime.player.identity){runtime.player.identity.drafts=runtime.player.drafts;localStorage.setItem(PLAYER_STORAGE_KEY,JSON.stringify(runtime.player.identity));}}catch{}}
 function syncDraftsToSnapshot(){
   const c=runtime.player.snapshot?.match?.current;if(!c)return;
+  // Każda nowa próba/runda musi wystartować z czystym wyborem głosu, żetonu i polowania.
+  // Bez tego snapshot poprzedniej rundy mógł zostawić useToken=true lub stare optionId.
+  if(runtime.player.lastAttemptId!==c.attemptId){
+    runtime.player.lastAttemptId=c.attemptId;
+    runtime.player.drafts.voteOptionId="";
+    runtime.player.drafts.useToken=false;
+    runtime.player.drafts.huntTargetId="";
+    runtime.player.drafts.huntOptionId="";
+  }
   if(c.myVote){runtime.player.drafts.voteOptionId=c.myVote.optionId;runtime.player.drafts.useToken=!!c.myVote.useToken;}
   if(c.myAnswer)runtime.player.drafts.answer=c.myAnswer;
   if(c.myWolfDecision&&!c.myWolfDecision.skip){runtime.player.drafts.huntTargetId=c.myWolfDecision.targetPlayerId;runtime.player.drafts.huntOptionId=c.myWolfDecision.optionId;}
