@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.0.17";
+const APP_VERSION = "1.1.0";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -18,7 +18,8 @@ const COLORS = [
 const MODE = {
   warmup: {label:"Rozgrzewka", short:"Na trzeźwo", music:2, desc:"Gotowe pytania i odpowiedzi"},
   freestyle: {label:"Freestyle", short:"Po dwóch drinkach", music:3, desc:"Pytania z gry, odpowiedzi od Was"},
-  hardcore: {label:"Hardcore", short:"Hardcore", music:4, desc:"Sami tworzycie pytania i odpowiedzi"}
+  hardcore: {label:"Hardcore", short:"Hardcore", music:4, desc:"Sami tworzycie pytania i odpowiedzi"},
+  quiz: {label:"Quiz", short:"Quiz", music:2, desc:"5 odpowiedzi, jedna poprawna — liczy się wiedza i ryzyko"}
 };
 const PROLOGUE = [
   "Każde Stado gdzieś zmierza.",
@@ -66,6 +67,7 @@ const appEl = document.getElementById("app");
 const toastRoot = document.getElementById("toast-root");
 const sheepData = Array.isArray(window.STADO_SHEEP) ? window.STADO_SHEEP : [];
 const rawQuestions = window.STADO_QUESTIONS;
+const rawQuizQuestions = window.STADO_QUIZ;
 const sheepMap = new Map(sheepData.map(s => [String(s.id), s]));
 
 const runtime = {
@@ -87,6 +89,7 @@ const runtime = {
   },
   audio: {track:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:""},
   data: normalizeQuestionData(rawQuestions),
+  quizData: normalizeQuizData(rawQuizQuestions),
   diagnostics: []
 };
 
@@ -291,7 +294,7 @@ function handleInput(e){
     const v=document.querySelector("#roundValue"); if(v) v.textContent=runtime.configDraft.roundsPlanned;
   }
   if(t.id === "responseTime"){
-    runtime.configDraft.responseTimeSec = clamp(+t.value,20,120);
+    runtime.configDraft.responseTimeSec = clamp(+t.value,10,120);
     const v=document.querySelector("#responseTimeValue"); if(v) v.textContent=formatTimeSetting(runtime.configDraft.responseTimeSec);
   }
   if(t.dataset.field === "roomCode"){
@@ -361,6 +364,40 @@ function normalizeQuestionData(raw){
   return empty;
 }
 
+function normalizeQuizData(raw){
+  const source=Array.isArray(raw)?raw:(Array.isArray(raw?.questions)?raw.questions:[]);
+  return source.map((q,i)=>{
+    const answers=Array.isArray(q?.answers)?q.answers.map(a=>cleanText(typeof a==="string"?a:(a?.text||""))):[];
+    let correctIndex=Number.isInteger(q?.correctIndex)?q.correctIndex:-1;
+    if(correctIndex<0 && Number.isInteger(q?.correct) && q.correct>=0 && q.correct<answers.length) correctIndex=q.correct;
+    if(correctIndex<0 && typeof q?.correctAnswer==="string") correctIndex=answers.findIndex(a=>normalizeText(a)===normalizeText(q.correctAnswer));
+    return {id:String(q?.id??`quiz_${i+1}`),question:cleanText(q?.question||""),answers,correctIndex,category:cleanText(q?.category||""),difficulty:cleanText(q?.difficulty||"")};
+  });
+}
+function validQuizRecords(){
+  return (runtime.quizData||[]).filter(q=>{
+    if(!q.id||!cleanText(q.question)||graphemeCount(q.question)>QUESTION_LIMIT)return false;
+    if(!Array.isArray(q.answers)||q.answers.length!==5||q.correctIndex<0||q.correctIndex>4)return false;
+    const cleaned=q.answers.map(cleanText);
+    if(cleaned.some(a=>!a||graphemeCount(a)>QUESTION_LIMIT))return false;
+    return new Set(cleaned.map(normalizeText)).size===5;
+  });
+}
+function quizQuestionKey(q){return `quiz|${normalizeText(q.question)}`;}
+function eligibleQuizQuestions(room,includeUsed=false){
+  const seen=new Set();
+  return validQuizRecords().filter(q=>{
+    const key=quizQuestionKey(q);if(seen.has(key))return false;seen.add(key);
+    if(!includeUsed&&room?.match?.usedQuestionKeys?.includes(key))return false;
+    return true;
+  });
+}
+function chooseQuizQuestion(room){
+  const pool=eligibleQuizQuestions(room,false);if(!pool.length)return null;
+  const q=pick(pool),key=quizQuestionKey(q);room.match.usedQuestionKeys.push(key);
+  return {record:q,questionId:q.id,questionKey:key,type:"quiz",text:q.question,targetPlayerId:null};
+}
+
 function validateStaticData(){
   runtime.diagnostics=[];
   if(typeof window.Peer === "undefined") runtime.diagnostics.push({level:"error",text:"Nie załadowano biblioteki PeerJS."});
@@ -419,7 +456,13 @@ function eligibleQuestions(mode, room, includeUsed=false){
 function preflight(room){
   const errors=[], warnings=[];
   if(sheepData.filter(s=>s.selectable!==false).length < 12) warnings.push("Baza ma mniej niż 12 wybieralnych avatarów.");
-  if(room.config.mode!=="hardcore"){
+  if(room.config.mode==="quiz"){
+    const rawCount=(runtime.quizData||[]).length,pool=eligibleQuizQuestions(room,true);
+    if(!rawCount) errors.push("Brak bazy Quiz: dodaj plik data/quiz.js z window.STADO_QUIZ.");
+    else if(pool.length!==rawCount) warnings.push(`Quiz: poprawnych rekordów ${pool.length}/${rawCount}. Nieprawidłowe rekordy zostaną pominięte.`);
+    if(pool.length < room.config.roundsPlanned) errors.push(`Quiz: dostępnych unikalnych pytań: ${pool.length}, zaplanowanych rund: ${room.config.roundsPlanned}.`);
+    if(pool.length < 3) errors.push("Quiz wymaga co najmniej 3 prawidłowych pytań.");
+  }else if(room.config.mode!=="hardcore"){
     const pool=eligibleQuestions(room.config.mode, room, true);
     if(pool.length < room.config.roundsPlanned) errors.push(`Dostępnych unikalnych pytań: ${pool.length}, zaplanowanych rund: ${room.config.roundsPlanned}.`);
     if(pool.length < 3) errors.push("Tryb wymaga co najmniej 3 prawidłowych pytań.");
@@ -477,7 +520,7 @@ function makePlayer({name,sheepId,isBot=false,peerId="",joinToken=""}){
 }
 function makeStats(){
   return {
-    roundsPlayed:0,votesCast:0,herdWins:0,blackSheepWins:0,outsideHerd:0,zeroBaseRounds:0,
+    roundsPlayed:0,votesCast:0,herdWins:0,blackSheepWins:0,outsideHerd:0,zeroBaseRounds:0,quizCorrect:0,quizWrong:0,
     tokensUsed:0,tokensSuccessful:0,tokensEarned:0,tokenBonusPoints:0,tokensRedeemed:0,
     answerOpportunities:0,answersWritten:0,answersWon:0,targetRounds:0,ramRounds:0,
     wolfRounds:0,wolfHits:0,wolfMisses:0,wolfSkipped:0,wolfPointsGained:0,wolfPointsLost:0,
@@ -501,16 +544,18 @@ function startNewMatchState(room){
 function activePlayers(room=runtime.host.room){ return room?.players?.filter(p=>p.active&&!p.removed) || []; }
 function classifiedPlayers(room=runtime.host.room){ return activePlayers(room); }
 function actualAnswerCount(room=runtime.host.room){ return Math.min(room.config.answerCountRequested, activePlayers(room).length); }
+function startingTokens(room=runtime.host.room){return ["warmup","quiz"].includes(room?.config?.mode)?2:1;}
 function playerById(id,room=runtime.host.room){ return room?.players?.find(p=>p.playerId===id); }
 function sheepById(id){ return sheepMap.get(String(id)) || {id:"missing",name:"Owca",description:"",smallAvatar:"",bigAvatar:""}; }
 function currentAttempt(room=runtime.host.room){ return room?.match?.current || null; }
 
 function createOrApplyRoom(){
-  const cfg={...runtime.configDraft, roundsPlanned:clamp(+runtime.configDraft.roundsPlanned,3,30), answerCountRequested:clamp(+runtime.configDraft.answerCountRequested,3,5), responseTimeSec:clamp(+(runtime.configDraft.responseTimeSec||60),20,120)};
+  const cfg={...runtime.configDraft, roundsPlanned:clamp(+runtime.configDraft.roundsPlanned,3,30), answerCountRequested:clamp(+runtime.configDraft.answerCountRequested,3,5), responseTimeSec:clamp(+(runtime.configDraft.responseTimeSec||60),10,120)};
   runtime.configDraft=cfg;
   if(runtime.host.room){
     runtime.host.room.config={...cfg};
     runtime.host.room.status="LOBBY";
+    activePlayers(runtime.host.room).forEach(p=>{p.tokens=startingTokens(runtime.host.room);});
     commitHost("Zapisano konfigurację");
     return;
   }
@@ -648,7 +693,7 @@ function hostJoin(conn,msg){
   if(activePlayers(r).some(x=>x.normalizedName===nn)){send(conn,{type:"REJECT",code:"NAME_TAKEN",message:"Ta nazwa jest już zajęta."});return;}
   if(activePlayers(r).some(x=>!x.isBot&&x.sheepId===sid)){send(conn,{type:"REJECT",code:"SHEEP_TAKEN",message:"Ta Owca jest już zajęta — wybierz inną."});return;}
   const pl=makePlayer({name,sheepId:sid,isBot:false,peerId:conn.peer,joinToken});
-  r.players.push(pl); bindConnToPlayer(conn,pl);
+  pl.tokens=startingTokens(r);r.players.push(pl); bindConnToPlayer(conn,pl);
   // Send identity first. If a network hiccup follows, the phone already has
   // enough data to resume; commitHost then refreshes everyone in the lobby.
   sendWelcome(conn,pl,false);
@@ -740,7 +785,7 @@ function hostAddBot(){
   const botSheep=sheepData.find(s=>s.testOnly)||sheepData.find(s=>s.id==="bot");
   if(!botSheep){toast("Brak avatara BOT w data/sheep.js.","error");return;}
   let n=1,name; do{name=`BOT ${n++}`;}while(activePlayers(r).some(x=>normalizeName(x.name)===normalizeName(name)));
-  r.players.push(makePlayer({name,sheepId:botSheep.id,isBot:true}));
+  const bot=makePlayer({name,sheepId:botSheep.id,isBot:true});bot.tokens=startingTokens(r);r.players.push(bot);
   commitHost("Dodano BOT-a");
 }
 function hostRemovePlayer(id){
@@ -774,7 +819,7 @@ function removeFromRamOrder(r,pid){
 
 
 function configuredResponseSeconds(r=runtime.host.room){
-  return clamp(+(r?.config?.responseTimeSec ?? runtime.configDraft.responseTimeSec ?? 60),20,120);
+  return clamp(+(r?.config?.responseTimeSec ?? runtime.configDraft.responseTimeSec ?? 60),10,120);
 }
 function isTimedPhase(phase){return ["QUESTION_INPUT","ANSWER_INPUT","VOTING"].includes(phase);}
 function clearPhaseTimer(){if(runtime.host.phaseTimer){clearTimeout(runtime.host.phaseTimer);runtime.host.phaseTimer=null;}}
@@ -838,7 +883,7 @@ function hostStartMatch(){
   if(offline.length){toast(`Czekamy na połączenie: ${offline.map(x=>x.name).join(", ")}`,"error");return;}
   const pf=preflight(r);
   if(pf.errors.length){runtime.modal={type:"preflight",errors:pf.errors,warnings:pf.warnings};render();return;}
-  aps.forEach(x=>{x.points=0;x.tokens=1;x.stats=makeStats();x.replayReady=false;});
+  aps.forEach(x=>{x.points=0;x.tokens=startingTokens(r);x.stats=makeStats();x.replayReady=false;});
   r.match=startNewMatchState(r);r.status="PROLOGUE";r.paused=false;
   commitHost("Start meczu"); startPrologueTimer();
 }
@@ -872,6 +917,14 @@ function prepareRound(){
   if(r.config.mode==="hardcore"){
     cur.ramPlayerId=getCurrentRam(r);
     cur.phase="QUESTION_INPUT";
+  }else if(r.config.mode==="quiz"){
+    const q=chooseQuizQuestion(r);
+    if(!q){cur.phase="NO_QUESTIONS";m.current=cur;commitHost("Brak pytań Quiz");return;}
+    cur.type="quiz";cur.questionId=q.questionId;cur.questionKey=q.questionKey;cur.questionText=q.text;cur.targetPlayerId=null;
+    cur.options=shuffle(q.record.answers.map((text,i)=>({optionId:uid("opt"),text,authorPlayerId:null,candidatePlayerId:null,isCorrect:i===q.record.correctIndex})))
+      .map((o,i)=>({...o,order:i,letter:COLORS[i]?.letter||String(i+1),colorKey:COLORS[i]?.key||"a"}));
+    cur.correctOptionId=cur.options.find(o=>o.isCorrect)?.optionId||null;
+    cur.phase="VOTING";
   }else{
     const q=chooseQuestion(r);
     if(!q){cur.phase="NO_QUESTIONS";m.current=cur;commitHost("Brak pytań");return;}
@@ -1033,7 +1086,8 @@ function hostSettleRound(){
   const topIds=Object.keys(counts).filter(id=>counts[id]===maxVotes && maxVotes>0);
   const tiedTop=topIds.length>1;
   const singletonIds=Object.keys(counts).filter(id=>counts[id]===1);
-  const blackOptionId=singletonIds.length===1?singletonIds[0]:null;
+  const correctOptionId=c.type==="quiz"?c.correctOptionId:null;
+  const blackOptionId=c.type==="quiz"?null:(singletonIds.length===1?singletonIds[0]:null);
   const ledger={};
   aps.forEach(pl=>ledger[pl.playerId]={playerId:pl.playerId,before:pl.points,base:0,voteAward:"none",tokenUsed:false,tokenDelta:0,authorToken:0,wolfDelta:0,lostToWolf:0,timedOut:(c.timedOutPlayerIds||[]).includes(pl.playerId),after:pl.points});
 
@@ -1041,14 +1095,18 @@ function hostSettleRound(){
   aps.forEach(pl=>{
     const v=c.votes[pl.playerId],L=ledger[pl.playerId]; if(!v)return;
     let base=0,award="outside";
-    if(blackOptionId && v.optionId===blackOptionId){base=3;award="black";}
+    if(c.type==="quiz"){
+      const correct=!!correctOptionId&&v.optionId===correctOptionId;base=correct?2:0;award=correct?"quiz_correct":"quiz_wrong";
+    }else if(blackOptionId && v.optionId===blackOptionId){base=3;award="black";}
     else if(topIds.includes(v.optionId)){base=tiedTop?1:2;award=tiedTop?"tie":"herd";}
     L.base=base;L.voteAward=award;L.tokenUsed=!!v.useToken;
     const votePoints=v.useToken?base*2:base;
     L.votePoints=votePoints;
     pl.points+=votePoints;
     pl.stats.roundsPlayed++;pl.stats.votesCast++;
-    if(award==="herd"||award==="tie")pl.stats.herdWins++;
+    if(award==="quiz_correct")pl.stats.quizCorrect++;
+    else if(award==="quiz_wrong")pl.stats.quizWrong++;
+    else if(award==="herd"||award==="tie")pl.stats.herdWins++;
     else if(award==="black")pl.stats.blackSheepWins++;
     else {pl.stats.outsideHerd++; if(base===0)pl.stats.zeroBaseRounds++;}
     if(v.useToken){
@@ -1059,7 +1117,7 @@ function hostSettleRound(){
   });
 
   // 3) Reward authors of the most-voted player-written answer(s).
-  if(r.config.mode!=="warmup" && c.type!=="which_sheep"){
+  if(!["warmup","quiz"].includes(r.config.mode) && c.type!=="which_sheep"){
     topIds.forEach(oid=>{
       const opt=c.options.find(o=>o.optionId===oid); if(!opt?.authorPlayerId)return;
       const author=playerById(opt.authorPlayerId,r); if(!author||!author.active||author.removed)return;
@@ -1122,7 +1180,7 @@ function hostSettleRound(){
   aps.forEach(pl=>{if(ledger[pl.playerId])ledger[pl.playerId].after=pl.points;});
   const voterMap={};c.options.forEach(o=>voterMap[o.optionId]=aps.filter(pl=>c.votes[pl.playerId]?.optionId===o.optionId).map(pl=>pl.playerId));
   c.settlement={
-    settledAt:Date.now(),counts,topOptionIds:topIds,tiedTop,blackOptionId,voterMap,ledger,wolfResult,
+    settledAt:Date.now(),counts,topOptionIds:topIds,tiedTop,blackOptionId,correctOptionId,voterMap,ledger,wolfResult,
     optionResults:c.options.map(o=>({optionId:o.optionId,text:o.text,candidatePlayerId:o.candidatePlayerId,authorPlayerId:o.authorPlayerId,count:counts[o.optionId]||0,letter:o.letter,colorKey:o.colorKey}))
   };
   c.phase="RESULT";
@@ -1135,6 +1193,10 @@ function hostSettleRound(){
 
 function makeHistoryEntry(r,c){
   const s=c.settlement;
+  if(c.type==="quiz"){
+    const correct=optionLabel(c,c.options.find(o=>o.optionId===s.correctOptionId),true);
+    return {round:c.number,type:c.type,question:c.questionText,top:correct,correctAnswer:correct,blackPlayerId:null,wolfResult:s.wolfResult||null,at:Date.now()};
+  }
   const topNames=s.topOptionIds.map(id=>optionLabel(c,c.options.find(o=>o.optionId===id),true));
   const blackVoter=s.blackOptionId?(s.voterMap[s.blackOptionId]||[])[0]:null;
   return {
@@ -1168,7 +1230,7 @@ function hostFinalize(early=false){
   stopPrologueTimer();
   if(m.settledRounds===0){
     m.finalized=true;m.earlyEnded=!!early;r.status="FINAL";
-    m.finalResult={noWinner:true,reason:"Gra zakończona przed rozegraniem pierwszej rundy.",rankings:[],podium:[],awards:{herd:[],black:[],allIn:[]}};
+    m.finalResult={noWinner:true,reason:"Gra zakończona przed rozegraniem pierwszej rundy.",rankings:[],podium:[],awards:{herd:[],black:[],quiz:[],allIn:[]}};
     commitHost("Gra zakończona przed rozpoczęciem");return;
   }
   const aps=classifiedPlayers(r);
@@ -1193,7 +1255,7 @@ function buildFinalResult(r){
   };
   return {
     noWinner:false,rankings:players.map(p=>({playerId:p.playerId,points:p.points,place:p.stats.finalPlace})),podium,
-    awards:{herd:award("herdWins"),black:award("blackSheepWins"),allIn:award("tokensUsed")},finishedAt:Date.now()
+    awards:{herd:award("herdWins"),black:award("blackSheepWins"),quiz:award("quizCorrect"),allIn:award("tokensUsed")},finishedAt:Date.now()
   };
 }
 
@@ -1201,7 +1263,7 @@ function hostReplay(){
   const r=runtime.host.room;if(!r||r.status!=="FINAL")return;
   clearPhaseTimer();
   const aps=activePlayers(r);if(aps.length<MIN_PLAYERS){toast("Do rewanżu potrzeba minimum 3 Owiec.","error");return;}
-  aps.forEach(p=>{p.points=0;p.tokens=1;p.stats=makeStats();p.replayReady=false;});
+  aps.forEach(p=>{p.points=0;p.tokens=startingTokens(r);p.stats=makeStats();p.replayReady=false;});
   r.match=startNewMatchState(r);r.status="PROLOGUE";r.paused=false;r.actionLog={};
   playMusic(1);commitHost("Rewanż");startPrologueTimer();
 }
@@ -1210,7 +1272,7 @@ function hostNewGame(){
   const r=runtime.host.room;if(!r)return;
   clearPhaseTimer();
   stopPrologueTimer();
-  activePlayers(r).forEach(p=>{p.points=0;p.tokens=1;p.stats=makeStats();p.replayReady=false;});
+  activePlayers(r).forEach(p=>{p.points=0;p.tokens=startingTokens(r);p.stats=makeStats();p.replayReady=false;});
   r.match=null;r.status="CONFIG";r.paused=false;r.actionLog={};runtime.configDraft={...r.config};
   playMusic(1);commitHost("Nowa gra — konfiguracja");
 }
@@ -1327,7 +1389,7 @@ function buildPlayerSnapshot(pid){
 function personalSettlementView(r,c,pid){
   const s=c.settlement,L=s.ledger[pid]||null;
   return {
-    counts:{...s.counts},topOptionIds:[...s.topOptionIds],tiedTop:s.tiedTop,blackOptionId:s.blackOptionId,
+    counts:{...s.counts},topOptionIds:[...s.topOptionIds],tiedTop:s.tiedTop,blackOptionId:s.blackOptionId,correctOptionId:s.correctOptionId||null,
     voterMap:JSON.parse(JSON.stringify(s.voterMap)),
     optionResults:s.optionResults.map(x=>({...x})),wolfResult:s.wolfResult?{...s.wolfResult}:null,ledger:L?{...L}:null
   };
@@ -1753,13 +1815,11 @@ function renderConfig(room=null){
         <label class="form-label">Liczba rund: <b id="roundValue">${cfg.roundsPlanned}</b></label>
         <div class="range-row"><input id="rounds" type="range" min="3" max="30" value="${cfg.roundsPlanned}"><span>3–30</span></div>
         <label class="form-label" style="margin-top:18px">⏱ Limit czasu na ruch: <b id="responseTimeValue">${formatTimeSetting(cfg.responseTimeSec??60)}</b></label>
-        <div class="range-row"><input id="responseTime" type="range" min="20" max="120" step="10" value="${clamp(+(cfg.responseTimeSec??60),20,120)}"><span>20 s – 2 min</span></div>
+        <div class="range-row"><input id="responseTime" type="range" min="10" max="120" step="10" value="${clamp(+(cfg.responseTimeSec??60),10,120)}"><span>10 s – 2 min</span></div>
         <p class="muted small">Dotyczy wpisywania odpowiedzi/pytania i głosowania. Brak głosu w czasie = 0 pkt w tej rundzie. Polowanie Wilka na osobę bez głosu jest neutralne.</p>
         <h3 class="subhead" style="margin-top:22px">Jak grubo gramy?</h3>
         <div class="mode-cards">${Object.entries(MODE).map(([key,m])=>`<button class="mode-card ${cfg.mode===key?"active":""}" data-action="mode" data-value="${key}"><span class="mode-kicker">${esc(m.short)}</span><b>${modeIcon(key)} ${esc(m.label)}</b><small>${esc(m.desc)}</small></button>`).join("")}</div>
-        <h3 class="subhead" style="margin-top:22px">Liczba odpowiedzi</h3>
-        <div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div>
-        <p class="muted small">${suggested}. Jeżeli dołączy mniej graczy niż wybrano odpowiedzi, liczba odpowiedzi spada do liczby aktywnych Owiec.</p>
+        ${cfg.mode==="quiz"?`<div class="info-item" style="margin-top:22px"><b>🧠 Quiz zawsze ma 5 odpowiedzi</b><br><small class="muted">Dokładnie jedna odpowiedź jest poprawna.</small></div>`:`<h3 class="subhead" style="margin-top:22px">Liczba odpowiedzi</h3><div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div><p class="muted small">${suggested}. Jeżeli dołączy mniej graczy niż wybrano odpowiedzi, liczba odpowiedzi spada do liczby aktywnych Owiec.</p>`}
         <div class="info-item"><label class="spread"><span><b>🐺 Tryb Wilka</b><br><small class="muted">Tajna minigra po oddaniu głosu</small></span><span class="switch"><input type="checkbox" ${cfg.wolfEnabled?"checked":""} data-action="wolf-toggle"><span></span></span></label></div>
         <div class="row wrap" style="margin-top:20px"><button class="btn" data-action="create-room">${room?"ZAPISZ I WRÓĆ DO LOBBY":"UTWÓRZ POKÓJ"}</button>${!room?`<button class="btn light" data-action="back-start">Wróć</button>`:""}</div><div style="margin-top:14px">${versionHTML()}</div>
       </article>
@@ -1768,11 +1828,7 @@ function renderConfig(room=null){
         ${modeDescription(cfg.mode)}
         <h3 class="subhead">Jak działa punktacja?</h3>
         <div class="info-list">
-          <div class="info-item">🐑 <b>+2</b> — jedno największe Stado.</div>
-          <div class="info-item">🤝 <b>+1</b> — remis kilku największych Stad.</div>
-          <div class="info-item">🖤 <b>+3</b> — dokładnie jedna samotna Czarna Owca w całej rundzie.</div>
-          <div class="info-item">🧶 <b>×2</b> — Żeton Wełny podwaja punkty za własny głos. Niewykorzystany żeton daje +1 pkt w finale.</div>
-          ${cfg.mode!=="warmup"?`<div class="info-item">✍️ Autor odpowiedzi z największą liczbą głosów zdobywa <b>+1 Żeton Wełny</b>.</div>`:""}
+          ${cfg.mode==="quiz"?`<div class="info-item">🧠 <b>+2</b> — poprawna odpowiedź.</div><div class="info-item">❌ <b>0</b> — błędna odpowiedź lub brak głosu w czasie.</div><div class="info-item">🧶 <b>×2</b> — Żeton Wełny daje +4 za poprawną odpowiedź; przy błędzie żeton przepada. Każdy zaczyna z 2 żetonami.</div>`:`<div class="info-item">🐑 <b>+2</b> — jedno największe Stado.</div><div class="info-item">🤝 <b>+1</b> — remis kilku największych Stad.</div><div class="info-item">🖤 <b>+3</b> — dokładnie jedna samotna Czarna Owca w całej rundzie.</div><div class="info-item">🧶 <b>×2</b> — Żeton Wełny podwaja punkty za własny głos. Niewykorzystany żeton daje +1 pkt w finale.</div>${cfg.mode!=="warmup"?`<div class="info-item">✍️ Autor odpowiedzi z największą liczbą głosów zdobywa <b>+1 Żeton Wełny</b>.</div>`:`<div class="info-item">🧶 Rozgrzewka: każdy zaczyna z <b>2 Żetonami Wełny</b>.</div>`}`}
           ${cfg.wolfEnabled?`<div class="info-item">🐺 Wilk: trafienie <b>+1 / ofiara −2</b>, pudło <b>−1</b>, rezygnacja 0.</div>`:""}
         </div>
         ${pf.errors.length||pf.warnings.length?`<div class="data-diagnostics">${pf.errors.map(x=>`<div class="error-text">● ${esc(x)}</div>`).join("")}${pf.warnings.map(x=>`<div class="muted">● ${esc(x)}</div>`).join("")}</div>`:""}
@@ -1784,6 +1840,7 @@ function renderConfig(room=null){
 function modeDescription(mode){
   if(mode==="warmup")return `<p><b>Gotowe pytania i gotowe odpowiedzi.</b> W rundach „Która Owca?” wybieracie spośród wszystkich graczy. Najprostsza wersja na start.</p>`;
   if(mode==="freestyle")return `<p><b>Pytania losuje gra, odpowiedzi tworzycie Wy.</b> Wyjątkiem są rundy „Która Owca?”, gdzie odpowiedziami są uczestnicy. Autorzy zwycięskich odpowiedzi zdobywają Żetony Wełny.</p>`;
+  if(mode==="quiz")return `<p><b>Klasyczny quiz w stylu STADO.</b> Każde pytanie ma 5 odpowiedzi i dokładnie jedną poprawną. Poprawna odpowiedź daje +2 pkt. Nie ma Czarnej Owcy, Barana ani pisania odpowiedzi. Każdy zaczyna z 2 Żetonami Wełny. Wilk działa tylko wtedy, gdy włączysz go w ustawieniach.</p>`;
   return `<p><b>Sandbox chaos.</b> Każdą rundę prowadzi Baran: wybiera „Która Owca?” albo pytanie otwarte i sam pisze pytanie. Przy pytaniu otwartym odpowiedzi tworzą wybrane Owce; Baran dołącza do autorów tylko wtedy, gdy liczba odpowiedzi równa się liczbie aktywnych graczy.</p>`;
 }
 
@@ -1843,7 +1900,7 @@ function renderHostQuestion(c,r){
   if(c.phase==="NO_QUESTIONS")return `<div class="question-card"><div class="question-meta">Brak pytań</div>Nie ma kolejnego prawidłowego pytania w bazie dla tej konfiguracji.</div>`;
   if(c.phase==="QUESTION_INPUT")return `<div class="question-card"><div class="question-meta">🐏 Baran tej rundy: ${esc(playerById(c.ramPlayerId)?.name||"")}</div>Baran przygotowuje pytanie…</div>`;
   if(!c.questionText)return `<div class="question-card">Przygotowanie rundy…</div>`;
-  const meta=c.type==="target"&&c.targetPlayerId?`Pytanie o: ${esc(playerById(c.targetPlayerId)?.name||"")}`:c.type==="which_sheep"?"Wskaż Owcę":"";
+  const meta=c.type==="target"&&c.targetPlayerId?`Pytanie o: ${esc(playerById(c.targetPlayerId)?.name||"")}`:c.type==="which_sheep"?"Wskaż Owcę":c.type==="quiz"?"🧠 QUIZ — jedna poprawna odpowiedź":"";
   return `<div class="question-card">${meta?`<div class="question-meta">${meta}</div>`:""}${esc(c.questionText)}</div>`;
 }
 function renderHostAnswerArea(c,r){
@@ -1857,10 +1914,10 @@ function renderHostAnswerArea(c,r){
 function renderTextOptions(c,r){
   const result=c.settlement;
   return `<div class="answer-grid count-${Math.min(5,Math.max(3,c.options.length))}">${c.options.map((o,i)=>{
-    const key=COLORS[i]?.key||o.colorKey||"a",count=result?.counts?.[o.optionId],win=result?.topOptionIds?.includes(o.optionId),black=result?.blackOptionId===o.optionId;
+    const key=COLORS[i]?.key||o.colorKey||"a",count=result?.counts?.[o.optionId],win=result?(c.type==="quiz"?result.correctOptionId===o.optionId:result.topOptionIds?.includes(o.optionId)):false,black=c.type!=="quiz"&&result?.blackOptionId===o.optionId;
     const voters=result?(result.voterMap[o.optionId]||[]).map(pid=>playerById(pid,r)?.name||"?"):[];
     const author=result&&o.authorPlayerId?playerById(o.authorPlayerId,r):null;
-    return `<div class="answer-card ${key} ${win?"winner":""} ${black?"black-sheep":""}"><div class="answer-letter">${COLORS[i]?.letter||o.letter}</div><div class="answer-text">${esc(o.text)}</div>${result?`<div class="vote-count">${count} ${count===1?"głos":"głosów"}${author?` • autor: ${esc(author.name)}`:""}</div><div class="voter-chips">${voters.map(x=>`<span class="voter-chip">${esc(x)}</span>`).join("")}</div>`:""}</div>`;
+    return `<div class="answer-card ${key} ${win?"winner":""} ${black?"black-sheep":""}"><div class="answer-letter">${COLORS[i]?.letter||o.letter}</div><div class="answer-text">${esc(o.text)}</div>${result&&c.type==="quiz"&&result.correctOptionId===o.optionId?`<div class="quiz-correct-label">✓ POPRAWNA ODPOWIEDŹ</div>`:""}${result?`<div class="vote-count">${count} ${count===1?"głos":"głosów"}${author?` • autor: ${esc(author.name)}`:""}</div><div class="voter-chips">${voters.map(x=>`<span class="voter-chip">${esc(x)}</span>`).join("")}</div>`:""}</div>`;
   }).join("")}</div>`;
 }
 function renderWhichGrid(c,r){
@@ -1899,17 +1956,23 @@ function renderHostStatus(c,r){
     if(c.phase==="READY_TO_REVEAL")lines.push(`✅ Wszystkie decyzje zapisane. Można pokazać wyniki.`);
   }else if(c.phase==="RESULT"){
     const s=c.settlement;
-    lines.push(s.tiedTop?`🤝 Remis największych Stad — po +1.`:`🐑 Największe Stado zdobywa +2.`);
-    if(s.blackOptionId){const pid=(s.voterMap[s.blackOptionId]||[])[0];lines.push(`🖤 Czarna Owca: ${playerById(pid)?.name||"Owca"} (+3).`);}else lines.push(`🖤 Brak unikalnej Czarnej Owcy.`);
+    if(c.type==="quiz"){
+      const correct=c.options.find(o=>o.optionId===s.correctOptionId),correctVotes=(s.voterMap?.[s.correctOptionId]||[]).length;
+      lines.push(`🧠 Poprawna odpowiedź: ${optionLabel(c,correct,true)}.`);
+      lines.push(`✅ Poprawnie odpowiedziało: ${correctVotes}/${activePlayers(r).length}.`);
+    }else{
+      lines.push(s.tiedTop?`🤝 Remis największych Stad — po +1.`:`🐑 Największe Stado zdobywa +2.`);
+      if(s.blackOptionId){const pid=(s.voterMap[s.blackOptionId]||[])[0];lines.push(`🖤 Czarna Owca: ${playerById(pid)?.name||"Owca"} (+3).`);}else lines.push(`🖤 Brak unikalnej Czarnej Owcy.`);
+    }
     if(s.wolfResult)lines.push(wolfResultText(r,c,s.wolfResult));
   }else if(c.phase==="NO_QUESTIONS")lines.push("⚠️ Skończyła się pula prawidłowych pytań.");
   return `<div class="status-lines">${lines.map(x=>`<div class="status-line">${x}</div>`).join("")}</div>`;
 }
 function renderHistory(r){
   const h=(r.match?.history||[]).slice(-3).reverse();if(!h.length)return `<div class="muted small">Historia pojawi się po pierwszej rozliczonej rundzie.</div>`;
-  return `<div class="history-list">${h.map(x=>`<div class="history-item"><strong>Runda ${x.round}</strong><div>${esc(truncate(x.question,84))}</div><div class="small muted">Stado: ${esc(truncate(x.top,55))}${x.blackPlayerId?` • Czarna: ${esc(playerById(x.blackPlayerId,r)?.name||"")}`:""}</div></div>`).join("")}</div>`;
+  return `<div class="history-list">${h.map(x=>`<div class="history-item"><strong>Runda ${x.round}</strong><div>${esc(truncate(x.question,84))}</div><div class="small muted">${x.type==="quiz"?`Poprawna: ${esc(truncate(x.correctAnswer||x.top,55))}`:`Stado: ${esc(truncate(x.top,55))}${x.blackPlayerId?` • Czarna: ${esc(playerById(x.blackPlayerId,r)?.name||"")}`:""}`}</div></div>`).join("")}</div>`;
 }
-function renderScoreRules(r){return `<div class="score-rules"><div class="score-rule">🐑 +2 — jedno największe Stado</div><div class="score-rule">🤝 +1 — remis największych Stad</div><div class="score-rule">🖤 +3 — jedyna samotna Czarna Owca</div><div class="score-rule">🧶 ×2 — Żeton mnoży punkty za głos; niewykorzystany = +1 pkt w finale</div>${r.config.mode!=="warmup"?`<div class="score-rule">✍️ +1 Żeton — autor zwycięskiej odpowiedzi</div>`:""}${r.config.wolfEnabled?`<div class="score-rule">🐺 trafienie +1 / ofiara −2 • pudło −1</div>`:""}</div>`;}
+function renderScoreRules(r){if(r.config.mode==="quiz")return `<div class="score-rules"><div class="score-rule">🧠 +2 — poprawna odpowiedź</div><div class="score-rule">❌ 0 — odpowiedź błędna / brak głosu</div><div class="score-rule">🧶 ×2 — poprawna z żetonem = +4; błędna = 0 i żeton przepada</div><div class="score-rule">🧶 Start: 2 żetony • zachowany = +1 pkt w finale</div>${r.config.wolfEnabled?`<div class="score-rule">🐺 trafienie +1 / ofiara −2 • pudło −1</div>`:""}</div>`;return `<div class="score-rules"><div class="score-rule">🐑 +2 — jedno największe Stado</div><div class="score-rule">🤝 +1 — remis największych Stad</div><div class="score-rule">🖤 +3 — jedyna samotna Czarna Owca</div><div class="score-rule">🧶 ×2 — Żeton mnoży punkty za głos; niewykorzystany = +1 pkt w finale</div>${r.config.mode!=="warmup"?`<div class="score-rule">✍️ +1 Żeton — autor zwycięskiej odpowiedzi</div>`:`<div class="score-rule">🧶 Rozgrzewka: start z 2 żetonami</div>`}${r.config.wolfEnabled?`<div class="score-rule">🐺 trafienie +1 / ofiara −2 • pudło −1</div>`:""}</div>`;}
 function progressHTML(done,total){const pct=total?Math.round(done/total*100):0;return `<div class="host-status-line"><div class="progressbar" style="--pct:${pct}%"><span></span></div><b>${done}/${total}</b></div>`;}
 
 function renderHostFinal(r){
@@ -1918,7 +1981,7 @@ function renderHostFinal(r){
   const levels=[...new Set(f.rankings.map(x=>x.place))].filter(x=>x<=3);
   return `<main class="final-host"><header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">🏆 FINAŁ STADA</span><span class="badge pink">${esc(MODE[r.config.mode].label)}</span></div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
     <section class="podium">${levels.map(place=>`<div class="podium-level ${place===1?"first":""}"><h3 class="center">${medal(place)} ${place}. miejsce</h3><div class="podium-players">${f.rankings.filter(x=>x.place===place).map(x=>{const p=playerById(x.playerId,r);return `<div class="podium-person">${sheepImg(p)}<b>${esc(p.name)}</b><div>${p.points} pkt</div></div>`;}).join("")}</div></div>`).join("")}</section>
-    <section class="final-main"><div class="card pad"><h2>Wyróżnienia</h2><div class="awards-grid">${awardCard(r,"🐑 Owca Stada",f.awards.herd,"Najczęściej głosowała z największym Stadem.")}${awardCard(r,"🖤 Czarna Owca Gry",f.awards.black,"Najczęściej była jedyną Czarną Owcą.")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej ryzykowała Żetonem Wełny.")}</div></div><div class="card pad"><h2>Klasyfikacja końcowa</h2><div class="ranking">${f.rankings.map(x=>{const p=playerById(x.playerId,r);return `<div class="ranking-row"><b>${x.place}</b>${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))}</div></div><b>${x.points} pkt</b></div>`;}).join("")}</div></div></section>
+    <section class="final-main"><div class="card pad"><h2>Wyróżnienia</h2><div class="awards-grid ${r.config.mode==="quiz"?"quiz-awards":""}">${r.config.mode==="quiz"?`${awardCard(r,"🧠 Mózg Stada",f.awards.quiz||[],"Najwięcej poprawnych odpowiedzi w Quizie.")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej ryzykowała Żetonem Wełny.")}`:`${awardCard(r,"🐑 Owca Stada",f.awards.herd,"Najczęściej głosowała z największym Stadem.")}${awardCard(r,"🖤 Czarna Owca Gry",f.awards.black,"Najczęściej była jedyną Czarną Owcą.")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej ryzykowała Żetonem Wełny.")}`}</div></div><div class="card pad"><h2>Klasyfikacja końcowa</h2><div class="ranking">${f.rankings.map(x=>{const p=playerById(x.playerId,r);return `<div class="ranking-row"><b>${x.place}</b>${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))}</div></div><b>${x.points} pkt</b></div>`;}).join("")}</div></div></section>
     <div class="row" style="justify-content:center"><button class="btn" data-action="replay">↻ Zagraj ponownie</button><button class="btn secondary" data-action="new-game">⚙ Nowa gra</button><button class="btn ghost" data-action="close-room">⌂ Powrót do menu</button></div>${confettiHTML()}</main>`;
 }
 function awardCard(r,title,ids,desc){return `<div class="award-card"><h3>${title}</h3>${ids.length?ids.map(id=>{const p=playerById(id,r);return `<div>${sheepImg(p)}<b>${esc(p?.name||"")}</b></div>`;}).join(""):`<div class="muted">Nie przyznano</div>`}<p class="small muted">${esc(desc)}</p></div>`;}
@@ -2015,19 +2078,32 @@ function renderWolf(c,s){
 }
 function renderPhoneRoundResult(c,s){
   const x=c.settlement,L=x?.ledger;if(!x||!L)return renderPhoneWait("Wyniki rundy","Spójrz na ekran główny.","assets/phone/czekatel.png");
-  const baseText=L.timedOut?"Brak głosu w czasie":L.voteAward==="black"?"Czarna Owca":L.voteAward==="herd"?"Największe Stado":L.voteAward==="tie"?"Remis największych Stad":"Poza punktami";
-  return `<div class="result-box"><h2>Wynik rundy</h2><div class="result-row"><span>Twój głos</span><b>${baseText}</b></div><div class="result-row"><span>Punkty za głos${L.tokenUsed?" z Żetonem ×2":""}</span><b>${signed(L.votePoints||0)}</b></div>${L.authorToken?`<div class="result-row"><span>Twoja odpowiedź wygrała</span><b>+${L.authorToken} 🧶</b></div>`:""}${L.wolfDelta?`<div class="result-row"><span>Rozliczenie Wilka</span><b>${signed(L.wolfDelta)} pkt</b></div>`:""}<div class="result-row"><span>Stan po rundzie</span><b>${L.after} pkt • 🧶 ${s.self.tokens}</b></div>${x.wolfResult?`<div class="hint-box" style="margin-top:12px">${wolfResultTextFromSnapshot(s,c,x.wolfResult)}</div>`:""}<p class="muted center">Następną rundę uruchamia prowadzący.</p></div>`;
+  const isQuiz=c.type==="quiz",baseText=L.timedOut?"Brak głosu w czasie":L.voteAward==="quiz_correct"?"Poprawna odpowiedź":L.voteAward==="quiz_wrong"?"Błędna odpowiedź":L.voteAward==="black"?"Czarna Owca":L.voteAward==="herd"?"Największe Stado":L.voteAward==="tie"?"Remis największych Stad":"Poza punktami";
+  const correctQuiz=isQuiz?x.optionResults?.find(o=>o.optionId===x.correctOptionId):null;
+  return `<div class="result-box"><h2>Wynik rundy</h2><div class="result-row"><span>Twój głos</span><b>${baseText}</b></div>${isQuiz?`<div class="result-row"><span>Poprawna odpowiedź</span><b>${esc(correctQuiz?.text||"—")}</b></div>`:""}<div class="result-row"><span>Punkty za głos${L.tokenUsed?" z Żetonem ×2":""}</span><b>${signed(L.votePoints||0)}</b></div>${L.authorToken?`<div class="result-row"><span>Twoja odpowiedź wygrała</span><b>+${L.authorToken} 🧶</b></div>`:""}${L.wolfDelta?`<div class="result-row"><span>Rozliczenie Wilka</span><b>${signed(L.wolfDelta)} pkt</b></div>`:""}<div class="result-row"><span>Stan po rundzie</span><b>${L.after} pkt • 🧶 ${s.self.tokens}</b></div>${x.wolfResult?`<div class="hint-box" style="margin-top:12px">${wolfResultTextFromSnapshot(s,c,x.wolfResult)}</div>`:""}<p class="muted center">Następną rundę uruchamia prowadzący.</p></div>`;
 }
 function renderPhoneFinal(s){
   const f=s.match.finalResult,me=s.self,sh=sheepById(me.sheepId),sum=s.match.personalSummary||{sentences:[]};
   if(f.noWinner)return `<div class="final-box center"><h1>Gra zakończona</h1><p>Nie rozegrano żadnej punktowanej rundy.</p></div>`;
   const rank=f.rankings.find(x=>x.playerId===me.playerId)?.place||me.stats.finalPlace;
-  const myAwards=[];if(f.awards.herd.includes(me.playerId))myAwards.push("🐑 Owca Stada");if(f.awards.black.includes(me.playerId))myAwards.push("🖤 Czarna Owca Gry");if(f.awards.allIn.includes(me.playerId))myAwards.push("🧶 Owca All-In");
-  return `<div class="final-box center">${imgHTML(sh.smallAvatar,sh.name,"final-avatar")}<h1>${rank===1?"🏆 Wygrywasz!":`Finał: ${rank}. miejsce`}</h1><h2>${esc(me.name)} — ${esc(sh.name)}</h2><div class="final-score">${me.points} pkt</div><div class="stack" style="text-align:left;margin-top:14px"><div class="result-row"><span>Przed wymianą żetonów</span><b>${me.stats.scoreBeforeRedemption} pkt</b></div><div class="result-row"><span>Bonus za zachowane żetony</span><b>+${me.stats.tokenBonusPoints} pkt</b></div><div class="result-row"><span>Ze Stadem</span><b>${me.stats.herdWins}×</b></div><div class="result-row"><span>Czarna Owca</span><b>${me.stats.blackSheepWins}×</b></div><div class="result-row"><span>Użyte Żetony Wełny</span><b>${me.stats.tokensUsed}×</b></div><div class="result-row"><span>Wilk — trafienia / pudła / rezygnacje</span><b>${me.stats.wolfHits}/${me.stats.wolfMisses}/${me.stats.wolfSkipped}</b></div></div>${myAwards.length?`<div class="award-list" style="margin-top:14px">${myAwards.map(a=>`<div class="award">${a}</div>`).join("")}</div>`:""}<div class="hint-box final-text" style="margin-top:14px;text-align:left"><b>Twój raport ze Stada</b>${sum.sentences.map(t=>`<p>${esc(t)}</p>`).join("")}</div><button class="btn" data-action="replay-ready" style="margin-top:14px">↻ Chcę rewanżu</button><p class="small muted">Prowadzący decyduje o ponownym starcie.</p></div>`;
+  const myAwards=[];if(s.config.mode==="quiz"&&(f.awards.quiz||[]).includes(me.playerId))myAwards.push("🧠 Mózg Stada");if(s.config.mode!=="quiz"&&f.awards.herd.includes(me.playerId))myAwards.push("🐑 Owca Stada");if(s.config.mode!=="quiz"&&f.awards.black.includes(me.playerId))myAwards.push("🖤 Czarna Owca Gry");if(f.awards.allIn.includes(me.playerId))myAwards.push("🧶 Owca All-In");
+  return `<div class="final-box center">${imgHTML(sh.smallAvatar,sh.name,"final-avatar")}<h1>${rank===1?"🏆 Wygrywasz!":`Finał: ${rank}. miejsce`}</h1><h2>${esc(me.name)} — ${esc(sh.name)}</h2><div class="final-score">${me.points} pkt</div><div class="stack" style="text-align:left;margin-top:14px"><div class="result-row"><span>Przed wymianą żetonów</span><b>${me.stats.scoreBeforeRedemption} pkt</b></div><div class="result-row"><span>Bonus za zachowane żetony</span><b>+${me.stats.tokenBonusPoints} pkt</b></div>${s.config.mode==="quiz"?`<div class="result-row"><span>Poprawne odpowiedzi</span><b>${me.stats.quizCorrect||0}×</b></div><div class="result-row"><span>Błędne odpowiedzi</span><b>${me.stats.quizWrong||0}×</b></div>`:`<div class="result-row"><span>Ze Stadem</span><b>${me.stats.herdWins}×</b></div><div class="result-row"><span>Czarna Owca</span><b>${me.stats.blackSheepWins}×</b></div>`}<div class="result-row"><span>Użyte Żetony Wełny</span><b>${me.stats.tokensUsed}×</b></div><div class="result-row"><span>Wilk — trafienia / pudła / rezygnacje</span><b>${me.stats.wolfHits}/${me.stats.wolfMisses}/${me.stats.wolfSkipped}</b></div></div>${myAwards.length?`<div class="award-list" style="margin-top:14px">${myAwards.map(a=>`<div class="award">${a}</div>`).join("")}</div>`:""}<div class="hint-box final-text" style="margin-top:14px;text-align:left"><b>Twój raport ze Stada</b>${sum.sentences.map(t=>`<p>${esc(t)}</p>`).join("")}</div><button class="btn" data-action="replay-ready" style="margin-top:14px">↻ Chcę rewanżu</button><p class="small muted">Prowadzący decyduje o ponownym starcie.</p></div>`;
 }
 
 function buildPersonalFinalSummary(r,pl){
   const s=pl.stats,sent=[];
+  if(r.config.mode==="quiz"){
+    const answered=(s.quizCorrect||0)+(s.quizWrong||0),rate=answered?(s.quizCorrect||0)/answered:0;
+    if(answered===0)sent.push("Quiz minął bez zapisanej odpowiedzi. Następnym razem warto zaryzykować przed końcem czasu.");
+    else if(rate>=.8)sent.push(`Mózg Stada pracował na wysokich obrotach: ${s.quizCorrect||0} poprawnych odpowiedzi na ${answered} oddanych.`);
+    else if(rate>=.55)sent.push(`Solidny wynik wiedzy: ${s.quizCorrect||0} poprawnych odpowiedzi na ${answered} oddanych.`);
+    else sent.push(`Quiz lubił zaskakiwać: ${s.quizCorrect||0} poprawnych odpowiedzi na ${answered} oddanych.`);
+    if(s.tokensUsed)sent.push(`Żetony Wełny wykorzystane: ${s.tokensUsed}; skuteczne: ${s.tokensSuccessful}.`);
+    else if(s.tokenBonusPoints)sent.push(`Zachowane Żetony Wełny dały na końcu +${s.tokenBonusPoints} pkt.`);
+    if(s.wolfRounds)sent.push(`Wilk: ${s.wolfHits} trafień, ${s.wolfMisses} pudeł, ${s.wolfSkipped} rezygnacji.`);
+    while(sent.length<3)sent.push(`Wynik końcowy: ${pl.points} pkt.`);
+    return {sentences:sent.slice(0,5)};
+  }
   const rounds=Math.max(1,s.roundsPlayed),herdRate=s.herdWins/rounds,black=s.blackSheepWins;
   if(black>=Math.max(2,Math.ceil(rounds*.25)))sent.push(`Stado próbowało Cię wchłonąć, ale ${black} razy udało Ci się zostać jedyną Czarną Owcą. Konsekwencja czy chaos? Wynik punktowy nie rozstrzyga.`);
   else if(herdRate>=.65)sent.push(`Masz wybitny radar na wspólne myślenie: w ${s.herdWins} rundach Twój głos należał do największego Stada.`);
@@ -2233,7 +2309,7 @@ function truncate(v,n){v=String(v||"");return graphemeCount(v)<=n?v:Array.from(v
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 function escAttr(v){return esc(v).replace(/`/g,"&#96;");}
 function readJSON(k){try{return JSON.parse(localStorage.getItem(k)||"null");}catch{return null;}}
-function modeIcon(m){return m==="warmup"?"🐑":m==="freestyle"?"🍸":"🔥";}
+function modeIcon(m){return m==="warmup"?"🐑":m==="freestyle"?"🍸":m==="quiz"?"🧠":"🔥";}
 function pluralToken(n){return n===1?"żeton":n>=2&&n<=4?"żetony":"żetonów";}
 function signed(n){return n>0?`+${n}`:`${n}`;}
 function medal(p){return p===1?"🥇":p===2?"🥈":"🥉";}
