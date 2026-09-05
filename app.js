@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.0.8";
+const APP_VERSION = "1.0.13";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -38,19 +38,28 @@ const LOCK_STORAGE_KEY = `stado:${pathKey}:hostlock`;
 
 const NETWORK = Object.assign({
   peerOptions: {},
-  // Multiple STUN endpoints + TURN fallback. TURN matters for phones behind
-  // restrictive/symmetric NATs, where a direct WebRTC connection can fail.
+  // Direct WebRTC first, then TURN relay fallback. The TLS/TCP 443 endpoint is
+  // important for restrictive mobile-carrier NAT/firewalls where Wi-Fi works
+  // but cellular data cannot establish a peer-to-peer route.
   iceServers: [
     {urls:["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302"]},
     {urls:"stun:stun.relay.metered.ca:80"},
     {urls:"turn:openrelay.metered.ca:80",username:"openrelayproject",credential:"openrelayproject"},
+    {urls:"turn:openrelay.metered.ca:80?transport=tcp",username:"openrelayproject",credential:"openrelayproject"},
     {urls:"turn:openrelay.metered.ca:443",username:"openrelayproject",credential:"openrelayproject"},
-    {urls:"turn:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"}
+    {urls:"turn:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"},
+    {urls:"turns:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"}
   ],
   heartbeatMs: 5000,
-  offlineAfterMs: 20000,
-  joinWelcomeTimeoutMs: 9000,
-  joinRetryDelays: [600,1800,4000]
+  offlineAfterMs: 16000,
+  connectionOpenTimeoutMs: 6500,
+  resumeOpenTimeoutMs: 6500,
+  resumeWelcomeTimeoutMs: 7000,
+  resumeRetryDelays: [0,700,1600,3000,5000,8000],
+  resumeConnectionModes: ["all","relay","relay","all","relay","relay"],
+  joinWelcomeTimeoutMs: 8000,
+  joinRetryDelays: [350,900,1800,3200,5000],
+  joinConnectionModes: ["all","relay","relay","all","relay","relay"]
 }, window.STADO_NETWORK_CONFIG || {});
 
 const appEl = document.getElementById("app");
@@ -62,20 +71,21 @@ const sheepMap = new Map(sheepData.map(s => [String(s.id), s]));
 const runtime = {
   role: "start",
   modal: null,
-  configDraft: {mode:"freestyle", roundsPlanned:15, answerCountRequested:4, wolfEnabled:false},
+  configDraft: {mode:"freestyle", roundsPlanned:15, answerCountRequested:4, wolfEnabled:false, responseTimeSec:60},
   host: {
     peer:null, conns:new Map(), playerConns:new Map(), room:null, pendingRecoveries:new Map(),
-    prologueTimer:null, lockTimer:null, wakeLock:null, storageOK:true, creating:false
+    prologueTimer:null, phaseTimer:null, lockTimer:null, wakeLock:null, storageOK:true, creating:false
   },
   player: {
     peer:null, conn:null, snapshot:null, roomInfo:null, identity:null, connected:false,
-    lastPong:0, reconnectTimer:null, reconnectAttempt:0, heartbeat:null, pending:new Map(),
+    lastPong:0, reconnectTimer:null, reconnectAttempt:0, resumeOpenTimer:null, resumeWelcomeTimer:null, resumeConnectionMode:"all", heartbeat:null, pending:new Map(),
     joinDraft:{roomCode:"", name:"", sheepId:"", recover:false}, pendingJoin:null,
-    joinAttemptToken:"", joining:false, joinRetryAttempt:0, joinRetryTimer:null, joinWelcomeTimer:null,
+    joinAttemptToken:"", joining:false, joinRetryAttempt:0, joinRetryTimer:null, joinWelcomeTimer:null, joinOpenTimer:null,
+    joinConnectionMode:"all", joinFailed:false, lastJoinError:"",
     drafts:{question:"", answer:"", hardcoreType:"open", voteOptionId:"", useToken:false, huntTargetId:"", huntOptionId:""},
     waitingRecovery:false, reconnecting:false, lastAttemptId:null
   },
-  audio: {track:0, volume:.35, muted:false, pausedByGame:false},
+  audio: {track:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:""},
   data: normalizeQuestionData(rawQuestions),
   diagnostics: []
 };
@@ -120,6 +130,11 @@ function bindGlobalEvents(){
   document.addEventListener("click", handleClick);
   document.addEventListener("input", handleInput);
   document.addEventListener("change", handleChange);
+  window.addEventListener("resize",()=>requestAnimationFrame(()=>{fitHostAnswerText();updateCountdownNodes();}));
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)kickPlayerReconnect();});
+  window.addEventListener("pageshow",()=>kickPlayerReconnect());
+  window.addEventListener("online",()=>kickPlayerReconnect());
+  setInterval(updateCountdownNodes,250);
   document.addEventListener("keydown", e => {
     if(e.key === "Escape" && runtime.modal){ runtime.modal = null; render(); }
   });
@@ -141,6 +156,11 @@ function bindGlobalEvents(){
 function handleClick(e){
   const el = e.target.closest("[data-action]");
   if(!el) return;
+  // Safari/iPadOS may block a later soundtrack switch unless the media element
+  // was activated by a user gesture. Retry any blocked track on the next host click.
+  if(runtime.role === "host" && runtime.audio.pendingTrack){
+    playMusic(runtime.audio.pendingTrack, true);
+  }
   const a = el.dataset.action;
   const id = el.dataset.id;
   const value = el.dataset.value;
@@ -243,6 +263,7 @@ function handleClick(e){
     render(); return;
   }
   if(a === "submit-join"){ playerSubmitJoin(); return; }
+  if(a === "submit-join-relay"){ playerSubmitJoin(true); return; }
   if(a === "toggle-recover"){ p.joinDraft.recover = !p.joinDraft.recover; render(); return; }
   if(a === "submit-recover"){ playerRequestRecovery(); return; }
   if(a === "player-menu"){ playerExitToMenu(); return; }
@@ -267,6 +288,10 @@ function handleInput(e){
   if(t.id === "rounds"){
     runtime.configDraft.roundsPlanned = clamp(+t.value,3,30);
     const v=document.querySelector("#roundValue"); if(v) v.textContent=runtime.configDraft.roundsPlanned;
+  }
+  if(t.id === "responseTime"){
+    runtime.configDraft.responseTimeSec = clamp(+t.value,20,120);
+    const v=document.querySelector("#responseTimeValue"); if(v) v.textContent=formatTimeSetting(runtime.configDraft.responseTimeSec);
   }
   if(t.dataset.field === "roomCode"){
     runtime.player.joinDraft.roomCode = cleanRoomCode(t.value);
@@ -480,7 +505,7 @@ function sheepById(id){ return sheepMap.get(String(id)) || {id:"missing",name:"O
 function currentAttempt(room=runtime.host.room){ return room?.match?.current || null; }
 
 function createOrApplyRoom(){
-  const cfg={...runtime.configDraft, roundsPlanned:clamp(+runtime.configDraft.roundsPlanned,3,30), answerCountRequested:clamp(+runtime.configDraft.answerCountRequested,3,5)};
+  const cfg={...runtime.configDraft, roundsPlanned:clamp(+runtime.configDraft.roundsPlanned,3,30), answerCountRequested:clamp(+runtime.configDraft.answerCountRequested,3,5), responseTimeSec:clamp(+(runtime.configDraft.responseTimeSec||60),20,120)};
   runtime.configDraft=cfg;
   if(runtime.host.room){
     runtime.host.room.config={...cfg};
@@ -511,8 +536,16 @@ function createHostPeerNew(cfg,tries){
   });
 }
 
-function createPeer(id){
-  const opts={...NETWORK.peerOptions, config:{iceServers:NETWORK.iceServers,...(NETWORK.peerOptions?.config||{})}};
+function createPeer(id,transportPolicy="all"){
+  const overrideConfig=NETWORK.peerOptions?.config||{};
+  const config={iceServers:NETWORK.iceServers,iceTransportPolicy:"all",iceCandidatePoolSize:2,...overrideConfig};
+  // A retry in relay mode deliberately forbids direct/STUN-only pairs. This
+  // forces TURN (including TURNS over TCP/443) on restrictive cellular links.
+  if(transportPolicy==="relay"){
+    config.iceTransportPolicy="relay";
+    config.iceCandidatePoolSize=4;
+  }
+  const opts={...NETWORK.peerOptions,config};
   return id ? new Peer(id,opts) : new Peer(opts);
 }
 function setupHostPeerHandlers(peer){
@@ -545,11 +578,14 @@ function acceptHostConnection(conn){
 function hostConnectionClosed(conn){
   runtime.host.conns.delete(conn.peer);
   const pid=conn.__playerId;
-  if(pid){
-    if(runtime.host.playerConns.get(pid)===conn) runtime.host.playerConns.delete(pid);
-    const pl=playerById(pid);
-    if(pl && !pl.isBot){ pl.connected=false; pl.peerId=""; commitHost("Gracz offline"); }
-  }
+  if(!pid)return;
+  // Gdy nowe połączenie zastępuje stare, zamknięcie STAREGO kanału nie może
+  // oznaczyć gracza jako offline. To był główny powód chwilowego statusu offline
+  // zaraz po poprawnym powrocie telefonu do gry.
+  if(runtime.host.playerConns.get(pid)!==conn)return;
+  runtime.host.playerConns.delete(pid);
+  const pl=playerById(pid);
+  if(pl && !pl.isBot){ pl.connected=false; pl.peerId=""; commitHost("Gracz offline"); }
 }
 
 function hostHandleMessage(conn,msg){
@@ -618,12 +654,15 @@ function hostJoin(conn,msg){
   commitHost("Nowa Owca dołączyła");
 }
 
-function bindConnToPlayer(conn,pl){
+function bindConnToPlayer(conn,pl,rotateKey=true){
   const old=runtime.host.playerConns.get(pl.playerId);
-  if(old && old!==conn){ try{old.close();}catch{} }
-  pl.connected=true;pl.peerId=conn.peer;pl.sessionGeneration=(pl.sessionGeneration||0)+1;pl.resumeKey=randomToken(24);
+  // Najpierw ustawiamy nowy kanał jako aktywny, a dopiero potem zamykamy stary.
+  // Dzięki temu callback starego kanału jest rozpoznawany jako nieaktualny.
+  pl.connected=true;pl.peerId=conn.peer;pl.sessionGeneration=(pl.sessionGeneration||0)+1;
+  if(rotateKey)pl.resumeKey=randomToken(24);
   conn.__playerId=pl.playerId;conn.__generation=pl.sessionGeneration;
   runtime.host.playerConns.set(pl.playerId,conn);
+  if(old && old!==conn){ try{old.close();}catch{} }
 }
 
 function hostResume(conn,msg){
@@ -632,7 +671,9 @@ function hostResume(conn,msg){
   const pl=playerById(payload.playerId);
   if(!pl || !pl.active || pl.removed || pl.isBot){send(conn,{type:"REJECT",code:"PLAYER",message:"Ta Owca nie jest aktywna w pokoju."});return;}
   if(payload.resumeKey!==pl.resumeKey){send(conn,{type:"REJECT",code:"KEY",message:"Ten klucz powrotu nie jest już aktualny. Użyj „Wróć do swojej Owcy”."});return;}
-  bindConnToPlayer(conn,pl);
+  // Przy zwykłym reconnect nie obracamy resumeKey. Jeżeli pakiet WELCOME
+  // zginie, kolejna automatyczna próba nadal może użyć tego samego klucza.
+  bindConnToPlayer(conn,pl,false);
   persistHost(); broadcastSnapshots();
   sendWelcome(conn,pl,true);
 }
@@ -730,8 +771,66 @@ function removeFromRamOrder(r,pid){
   if(m.ramOrder.length) m.ramCursor%=m.ramOrder.length; else m.ramCursor=0;
 }
 
+
+function configuredResponseSeconds(r=runtime.host.room){
+  return clamp(+(r?.config?.responseTimeSec ?? runtime.configDraft.responseTimeSec ?? 60),20,120);
+}
+function isTimedPhase(phase){return ["QUESTION_INPUT","ANSWER_INPUT","VOTING"].includes(phase);}
+function clearPhaseTimer(){if(runtime.host.phaseTimer){clearTimeout(runtime.host.phaseTimer);runtime.host.phaseTimer=null;}}
+function armPhaseTimer(r,c,reset=true){
+  clearPhaseTimer();
+  if(!r||!c||!isTimedPhase(c.phase))return;
+  const now=Date.now(),duration=configuredResponseSeconds(r)*1000;
+  if(reset||!c.phaseDeadlineAt){c.phaseStartedAt=now;c.phaseDeadlineAt=now+duration;c.phaseRemainingMs=null;}
+  if(r.paused){c.phaseRemainingMs=Math.max(0,(c.phaseDeadlineAt||now)-now);c.phaseDeadlineAt=0;return;}
+  const attemptId=c.attemptId,phase=c.phase,delay=Math.max(20,(c.phaseDeadlineAt||now)-now+20);
+  runtime.host.phaseTimer=setTimeout(()=>handlePhaseTimeout(attemptId,phase),delay);
+}
+function pausePhaseTimer(r){
+  const c=currentAttempt(r);clearPhaseTimer();
+  if(!c||!isTimedPhase(c.phase))return;
+  if(c.phaseDeadlineAt)c.phaseRemainingMs=Math.max(0,c.phaseDeadlineAt-Date.now());
+  c.phaseDeadlineAt=0;
+}
+function resumePhaseTimer(r){
+  const c=currentAttempt(r);if(!c||!isTimedPhase(c.phase))return;
+  const remaining=Number.isFinite(c.phaseRemainingMs)?c.phaseRemainingMs:configuredResponseSeconds(r)*1000;
+  c.phaseDeadlineAt=Date.now()+Math.max(250,remaining);c.phaseRemainingMs=null;armPhaseTimer(r,c,false);
+}
+function handlePhaseTimeout(attemptId,phase){
+  const r=runtime.host.room,c=currentAttempt(r);
+  if(!r||!c||c.attemptId!==attemptId||c.phase!==phase||r.paused||c.settlement)return;
+  clearPhaseTimer();c.phaseDeadlineAt=0;c.phaseRemainingMs=0;c.phaseTimedOut=true;c.timeoutPhase=phase;
+  if(phase==="QUESTION_INPUT"){
+    c.timedOutPlayerIds=[c.ramPlayerId].filter(Boolean);
+    hostAbortAttempt("Baran nie zdążył przygotować pytania — losujemy kolejną próbę.");
+    return;
+  }
+  if(phase==="ANSWER_INPUT"){
+    const submitted=(c.assignedAuthorIds||[]).filter(pid=>c.answers?.[pid]);
+    c.timedOutAuthorIds=(c.assignedAuthorIds||[]).filter(pid=>!c.answers?.[pid]);
+    if(submitted.length<2){
+      hostAbortAttempt("Za mało odpowiedzi wpłynęło w czasie — losujemy kolejną próbę.");
+      return;
+    }
+    c.options=shuffle(submitted.map(id=>({optionId:uid("opt"),text:c.answers[id].text,authorPlayerId:id,candidatePlayerId:null})))
+      .map((o,i)=>({...o,order:i,letter:COLORS[i]?.letter||String(i+1),colorKey:COLORS[i]?.key||"a"}));
+    c.phase="VOTING";armPhaseTimer(r,c,true);commitHost("Minął czas na wpisanie odpowiedzi");
+    return;
+  }
+  if(phase==="VOTING"){
+    c.timedOutPlayerIds=activePlayers(r).filter(pl=>!c.votes[pl.playerId]).map(pl=>pl.playerId);
+    if(c.wolfPlayerId&&c.votes[c.wolfPlayerId]&&!c.wolfDecision)c.wolfDecision={skip:true,timedOut:true,actionAt:Date.now()};
+    c.phase="READY_TO_REVEAL";commitHost("Minął czas na głosowanie");scheduleAutoSettle(c);
+  }
+}
 function hostStartMatch(){
   const r=runtime.host.room;if(!r||r.status!=="LOBBY")return;
+  clearPhaseTimer();
+  // Unlock the selected mode soundtrack during the START button gesture.
+  // This is important on Safari/iPadOS because the automatic end of the prologue
+  // happens later from a timer and may otherwise be denied by autoplay policy.
+  primeMusicTrack(MODE[r.config.mode]?.music || 2);
   const aps=activePlayers(r);
   if(aps.length<MIN_PLAYERS){toast("Potrzeba minimum 3 Owiec.","error");return;}
   const offline=aps.filter(x=>!x.isBot&&!x.connected);
@@ -765,7 +864,8 @@ function prepareRound(){
   const cur={
     roundId:uid("round"),attemptId:uid("attempt"),number:m.roundNumber,phase:"ROUND_PREPARE",
     type:null,questionId:null,questionKey:null,questionText:"",targetPlayerId:null,ramPlayerId:null,
-    assignedAuthorIds:[],answers:{},options:[],votes:{},tokenReservations:{},
+    assignedAuthorIds:[],answers:{},options:[],votes:{},tokenReservations:{},timedOutPlayerIds:[],timedOutAuthorIds:[],
+    phaseStartedAt:0,phaseDeadlineAt:0,phaseRemainingMs:null,phaseTimedOut:false,timeoutPhase:null,
     wolfPlayerId:null,wolfDecision:null,settlement:null,createdAt:Date.now(),aborted:false
   };
   if(r.config.mode==="hardcore"){
@@ -790,6 +890,7 @@ function prepareRound(){
   }
   assignWolf(r,cur);
   m.current=cur;
+  armPhaseTimer(r,cur,true);
   commitHost("Nowa runda");
 }
 
@@ -842,6 +943,7 @@ function handleSubmitQuestion(pid,payload){
   const text=validateUserText(payload.text,"Pytanie");
   c.questionText=text;c.type=type;c.questionId=null;c.questionKey=null;
   if(type==="which_sheep") publishSheepOptions(r,c); else beginAnswerInput(r,c);
+  armPhaseTimer(r,c,true);
   return {message:"Pytanie zapisane."};
 }
 function handleSubmitAnswer(pid,payload){
@@ -853,6 +955,7 @@ function handleSubmitAnswer(pid,payload){
     c.options=shuffle(c.assignedAuthorIds.map(id=>({optionId:uid("opt"),text:c.answers[id].text,authorPlayerId:id,candidatePlayerId:null})))
       .map((o,i)=>({...o,order:i,letter:COLORS[i].letter,colorKey:COLORS[i].key}));
     c.phase="VOTING";
+    armPhaseTimer(r,c,true);
   }
   return {message:"Odpowiedź zapisana."};
 }
@@ -890,9 +993,23 @@ function checkReady(r,c){
     if(c.wolfPlayerId===id)return !!c.wolfDecision;
     return true;
   });
-  if(ready)c.phase="READY_TO_REVEAL";
+  if(ready){
+    clearPhaseTimer();c.phaseDeadlineAt=0;c.phaseRemainingMs=null;
+    c.phase="READY_TO_REVEAL";
+    scheduleAutoSettle(c);
+  }
 }
-function ensurePhase(c,phase){if(!c||c.phase!==phase)throw gameErr("Ta akcja nie jest dostępna w obecnej fazie.","PHASE");}
+function scheduleAutoSettle(c){
+  const attemptId=c?.attemptId;
+  if(!attemptId)return;
+  setTimeout(()=>{
+    const r=runtime.host.room,current=currentAttempt(r);
+    if(!r||!current||current.attemptId!==attemptId)return;
+    if(current.phase!=="READY_TO_REVEAL"||current.settlement)return;
+    hostSettleRound();
+  },120);
+}
+function ensurePhase(c,phase){if(!c||c.phase!==phase)throw gameErr("Ta akcja nie jest dostępna w obecnej fazie.","PHASE");if(c.phaseDeadlineAt&&Date.now()>c.phaseDeadlineAt)throw gameErr("Czas na tę akcję już minął.","TIMEOUT");}
 function gameErr(msg,code){const e=new Error(msg);e.code=code;return e;}
 function validateUserText(raw,label){
   const t=cleanText(raw);if(!t)throw gameErr(`${label} nie może być puste.`,"TEXT");
@@ -907,6 +1024,7 @@ function hostSettleRound(){
   const r=runtime.host.room,c=currentAttempt(r);
   if(!r||!c||c.phase!=="READY_TO_REVEAL"){toast("Najpierw wszystkie Owce muszą zakończyć swoje działania.","error");return;}
   if(c.settlement){toast("Ta runda została już rozliczona.","error");return;}
+  clearPhaseTimer();c.phaseDeadlineAt=0;c.phaseRemainingMs=null;
   const aps=activePlayers(r);
   const counts={}; c.options.forEach(o=>counts[o.optionId]=0);
   aps.forEach(pl=>{const v=c.votes[pl.playerId];if(v&&counts[v.optionId]!==undefined)counts[v.optionId]++;});
@@ -916,7 +1034,7 @@ function hostSettleRound(){
   const singletonIds=Object.keys(counts).filter(id=>counts[id]===1);
   const blackOptionId=singletonIds.length===1?singletonIds[0]:null;
   const ledger={};
-  aps.forEach(pl=>ledger[pl.playerId]={playerId:pl.playerId,before:pl.points,base:0,voteAward:"none",tokenUsed:false,tokenDelta:0,authorToken:0,wolfDelta:0,lostToWolf:0,after:pl.points});
+  aps.forEach(pl=>ledger[pl.playerId]={playerId:pl.playerId,before:pl.points,base:0,voteAward:"none",tokenUsed:false,tokenDelta:0,authorToken:0,wolfDelta:0,lostToWolf:0,timedOut:(c.timedOutPlayerIds||[]).includes(pl.playerId),after:pl.points});
 
   // 1) Base voting result + 2) Wool Token multiplier.
   aps.forEach(pl=>{
@@ -971,23 +1089,30 @@ function hostSettleRound(){
       const d=c.wolfDecision;
       if(!d || d.skip){
         wolf.stats.wolfSkipped++;
-        wolfResult={wolfPlayerId:wolf.playerId,skip:true,hit:false,delta:0};
+        wolfResult={wolfPlayerId:wolf.playerId,skip:true,timedOut:!!d?.timedOut,hit:false,delta:0};
       }else{
         const target=playerById(d.targetPlayerId,r),targetVote=c.votes[d.targetPlayerId];
-        const hit=!!targetVote && targetVote.optionId===d.optionId;
         wolf.stats.wolfTargets.push(d.targetPlayerId);
-        if(hit){
-          wolf.points+=1;wolf.stats.wolfHits++;wolf.stats.wolfPointsGained++;
-          const before=target?target.points:0,loss=target?Math.min(2,target.points):0;
-          if(target){target.points-=loss;target.stats.pointsLostToWolf+=loss;}
-          wolf.stats.actualStolen+=loss;
-          if(ledger[wolf.playerId])ledger[wolf.playerId].wolfDelta+=1;
-          if(target&&ledger[target.playerId]){ledger[target.playerId].wolfDelta-=loss;ledger[target.playerId].lostToWolf+=loss;}
-          wolfResult={wolfPlayerId:wolf.playerId,skip:false,hit:true,targetPlayerId:d.targetPlayerId,predictedOptionId:d.optionId,targetOptionId:targetVote?.optionId||null,delta:1,targetLoss:loss,targetBefore:before};
+        // Jeżeli cel nie zagłosował przed końcem czasu, polowanie jest neutralne:
+        // bez +1 dla Wilka, bez -1 za pudło i bez -2 dla celu.
+        if(!targetVote){
+          wolf.stats.wolfSkipped++;
+          wolfResult={wolfPlayerId:wolf.playerId,skip:false,neutral:true,reason:"target_timeout",hit:false,targetPlayerId:d.targetPlayerId,predictedOptionId:d.optionId,targetOptionId:null,delta:0,targetLoss:0};
         }else{
-          const loss=Math.min(1,wolf.points);wolf.points-=loss;wolf.stats.wolfMisses++;wolf.stats.wolfPointsLost+=loss;
-          if(ledger[wolf.playerId])ledger[wolf.playerId].wolfDelta-=loss;
-          wolfResult={wolfPlayerId:wolf.playerId,skip:false,hit:false,targetPlayerId:d.targetPlayerId,predictedOptionId:d.optionId,targetOptionId:targetVote?.optionId||null,delta:-loss,targetLoss:0};
+          const hit=targetVote.optionId===d.optionId;
+          if(hit){
+            wolf.points+=1;wolf.stats.wolfHits++;wolf.stats.wolfPointsGained++;
+            const before=target?target.points:0,loss=target?Math.min(2,target.points):0;
+            if(target){target.points-=loss;target.stats.pointsLostToWolf+=loss;}
+            wolf.stats.actualStolen+=loss;
+            if(ledger[wolf.playerId])ledger[wolf.playerId].wolfDelta+=1;
+            if(target&&ledger[target.playerId]){ledger[target.playerId].wolfDelta-=loss;ledger[target.playerId].lostToWolf+=loss;}
+            wolfResult={wolfPlayerId:wolf.playerId,skip:false,hit:true,targetPlayerId:d.targetPlayerId,predictedOptionId:d.optionId,targetOptionId:targetVote.optionId,delta:1,targetLoss:loss,targetBefore:before};
+          }else{
+            const loss=Math.min(1,wolf.points);wolf.points-=loss;wolf.stats.wolfMisses++;wolf.stats.wolfPointsLost+=loss;
+            if(ledger[wolf.playerId])ledger[wolf.playerId].wolfDelta-=loss;
+            wolfResult={wolfPlayerId:wolf.playerId,skip:false,hit:false,targetPlayerId:d.targetPlayerId,predictedOptionId:d.optionId,targetOptionId:targetVote.optionId,delta:-loss,targetLoss:0};
+          }
         }
       }
     }
@@ -1026,6 +1151,7 @@ function hostNextRound(){
 
 function hostAbortAttempt(reason="Pominięto pytanie.",fromRemoval=false){
   const r=runtime.host.room,m=r?.match,c=m?.current;if(!r||!m||m.finalized)return;
+  clearPhaseTimer();
   if(c?.settlement){toast("Rozliczonej rundy nie można anulować.","error");return;}
   if(c){c.aborted=true;c.abortReason=reason;c.phase="ABORTED";c.tokenReservations={};}
   m.current=null;
@@ -1036,6 +1162,7 @@ function hostAbortAttempt(reason="Pominięto pytanie.",fromRemoval=false){
 
 function hostFinalize(early=false){
   const r=runtime.host.room,m=r?.match;if(!r||!m||m.finalized)return;
+  clearPhaseTimer();
   if(m.current && !m.current.settlement){m.current.aborted=true;m.current.tokenReservations={};m.current=null;}
   stopPrologueTimer();
   if(m.settledRounds===0){
@@ -1071,6 +1198,7 @@ function buildFinalResult(r){
 
 function hostReplay(){
   const r=runtime.host.room;if(!r||r.status!=="FINAL")return;
+  clearPhaseTimer();
   const aps=activePlayers(r);if(aps.length<MIN_PLAYERS){toast("Do rewanżu potrzeba minimum 3 Owiec.","error");return;}
   aps.forEach(p=>{p.points=0;p.tokens=1;p.stats=makeStats();p.replayReady=false;});
   r.match=startNewMatchState(r);r.status="PROLOGUE";r.paused=false;r.actionLog={};
@@ -1079,6 +1207,7 @@ function hostReplay(){
 
 function hostNewGame(){
   const r=runtime.host.room;if(!r)return;
+  clearPhaseTimer();
   stopPrologueTimer();
   activePlayers(r).forEach(p=>{p.points=0;p.tokens=1;p.stats=makeStats();p.replayReady=false;});
   r.match=null;r.status="CONFIG";r.paused=false;r.actionLog={};runtime.configDraft={...r.config};
@@ -1087,6 +1216,7 @@ function hostNewGame(){
 
 function hostCloseRoom(){
   const r=runtime.host.room;if(!r)return;
+  clearPhaseTimer();
   r.closed=true;r.status="CLOSED";broadcast({type:"ROOM_CLOSED",message:"Prowadzący zamknął pokój."});
   stopPrologueTimer();releaseWakeLock();releaseHostLock();
   try{runtime.host.peer?.destroy();}catch{}
@@ -1096,8 +1226,10 @@ function hostCloseRoom(){
 
 function hostTogglePause(){
   const r=runtime.host.room;if(!r||!["ROUND","PROLOGUE"].includes(r.status))return;
-  r.paused=!r.paused;
-  if(r.paused){pauseCurrentMusic();runtime.audio.pausedByGame=true;}else{runtime.audio.pausedByGame=false;playMusic(r.status==="PROLOGUE"?1:MODE[r.config.mode].music);}
+  const willPause=!r.paused;
+  if(willPause)pausePhaseTimer(r);
+  r.paused=willPause;
+  if(r.paused){pauseCurrentMusic();runtime.audio.pausedByGame=true;}else{runtime.audio.pausedByGame=false;playMusic(r.status==="PROLOGUE"?1:MODE[r.config.mode].music);resumePhaseTimer(r);}
   commitHost(r.paused?"Pauza":"Wznowiono grę");
 }
 
@@ -1180,6 +1312,7 @@ function buildPlayerSnapshot(pid){
   const reveal=!!c.settlement;
   snap.match.current={
     attemptId:c.attemptId,number:c.number,phase:c.phase,type:c.type,questionText:c.questionText,
+    phaseDeadlineAt:c.phaseDeadlineAt||0,timedOutPlayerIds:[...(c.timedOutPlayerIds||[])],timedOutAuthorIds:[...(c.timedOutAuthorIds||[])],
     targetPlayerId:c.targetPlayerId,ramPlayerId:c.ramPlayerId,
     isRam:c.ramPlayerId===pid,isAuthor:c.assignedAuthorIds.includes(pid),isWolf:c.wolfPlayerId===pid,
     myAnswer:c.answers?.[pid]?.text||"",myVote:c.votes?.[pid]||null,myWolfDecision:c.wolfPlayerId===pid?c.wolfDecision||null:null,
@@ -1206,7 +1339,13 @@ function persistHost(){
 function restoreHostSnapshot(){
   const saved=readJSON(HOST_STORAGE_KEY);if(!saved?.room||saved.room.closed)return false;
   const r=saved.room;if(r.protocolVersion!==PROTOCOL_VERSION)return false;
-  runtime.role="host";runtime.host.room=r;runtime.configDraft={...r.config};r.paused=true;
+  runtime.role="host";runtime.host.room=r;runtime.configDraft={responseTimeSec:60,...r.config};
+  const restoredCurrent=r.match?.current;
+  if(restoredCurrent&&isTimedPhase(restoredCurrent.phase)&&restoredCurrent.phaseDeadlineAt){
+    restoredCurrent.phaseRemainingMs=Math.max(1000,restoredCurrent.phaseDeadlineAt-(saved.savedAt||Date.now()));
+    restoredCurrent.phaseDeadlineAt=0;
+  }
+  r.paused=true;
   r.players.forEach(p=>{if(!p.isBot){p.connected=false;p.peerId="";}});
   acquireHostLock();render();
   const peer=createPeer(r.hostPeerId);runtime.host.peer=peer;
@@ -1243,11 +1382,18 @@ function previewRoom(code){
 }
 function setupPlayerConn(conn,opts={}){
   conn.on("open",()=>{
-    runtime.player.connected=true;runtime.player.lastPong=Date.now();runtime.player.reconnectAttempt=0;
+    const p=runtime.player;
+    if(p.conn===conn){clearTimeout(p.joinOpenTimer);p.joinOpenTimer=null;}
+    p.connected=true;p.lastPong=Date.now();
+    if(opts.connectionMode)p.joinConnectionMode=opts.connectionMode;
     startHeartbeat();
     send(conn,{type:"HELLO",protocolVersion:PROTOCOL_VERSION,appVersion:APP_VERSION});
-    if(opts.resume)send(conn,{type:"RESUME",protocolVersion:PROTOCOL_VERSION,appVersion:APP_VERSION,payload:{...runtime.player.identity}});
-    if(opts.join&&runtime.player.pendingJoin)sendPendingJoin(conn);
+    if(opts.resume){
+      send(conn,{type:"RESUME",protocolVersion:PROTOCOL_VERSION,appVersion:APP_VERSION,payload:{...p.identity}});
+      clearTimeout(p.resumeWelcomeTimer);
+      p.resumeWelcomeTimer=setTimeout(()=>{if(p.identity&&p.reconnecting&&p.conn===conn)failResumeConnection(conn,"resume-welcome-timeout");},NETWORK.resumeWelcomeTimeoutMs||7000);
+    }
+    if(opts.join&&p.pendingJoin)sendPendingJoin(conn);
     if(opts.recover)send(conn,{type:"RECOVER_REQUEST",protocolVersion:PROTOCOL_VERSION,appVersion:APP_VERSION,payload:opts.recover});
     render();
   });
@@ -1255,7 +1401,24 @@ function setupPlayerConn(conn,opts={}){
   // Do not permanently mark a connection as "preview". The same DataConnection
   // can now be promoted to the real player connection when DOŁĄCZ is pressed.
   conn.on("close",()=>playerDisconnected(conn));
-  conn.on("error",()=>playerDisconnected(conn));
+  conn.on("error",err=>{if(runtime.player.joining)runtime.player.lastJoinError=err?.type||err?.message||"data-error";playerDisconnected(conn);});
+
+  // PeerJS can occasionally leave a DataConnection in a silent "connecting"
+  // state on carrier networks. React to an explicit ICE failure immediately.
+  const pc=conn.peerConnection;
+  if(pc?.addEventListener){
+    let disconnectedTimer=null;
+    pc.addEventListener("iceconnectionstatechange",()=>{
+      const state=pc.iceConnectionState,p=runtime.player;
+      if(p.conn!==conn)return;
+      if(state==="connected"||state==="completed"){clearTimeout(disconnectedTimer);p.lastPong=Date.now();}
+      if((state==="failed"||state==="closed")&&p.joining&&!p.identity)failJoinConnection(conn,`ice-${state}`);
+      else if((state==="failed"||state==="closed")&&p.identity)failResumeConnection(conn,`ice-${state}`);
+      else if(state==="disconnected"&&p.identity){
+        clearTimeout(disconnectedTimer);disconnectedTimer=setTimeout(()=>{if(p.conn===conn&&pc.iceConnectionState==="disconnected")failResumeConnection(conn,"ice-disconnected");},1800);
+      }
+    });
+  }
 }
 function playerHandleMessage(msg){
   if(!msg||typeof msg!=="object")return;
@@ -1263,7 +1426,8 @@ function playerHandleMessage(msg){
   if(msg.type==="ROOM_INFO"){runtime.player.roomInfo=msg;render();return;}
   if(msg.type==="WELCOME"){
     clearJoinTimers();
-    runtime.player.joining=false;runtime.player.joinRetryAttempt=0;runtime.player.joinAttemptToken="";
+    runtime.player.joining=false;runtime.player.joinRetryAttempt=0;runtime.player.joinAttemptToken="";runtime.player.joinFailed=false;runtime.player.lastJoinError="";
+    clearResumeTimers();runtime.player.reconnecting=false;runtime.player.reconnectAttempt=0;
     runtime.player.identity={...msg.identity,status:"active",drafts:runtime.player.drafts};runtime.player.snapshot=msg.snapshot;runtime.player.roomInfo=null;runtime.player.pendingJoin=null;
     setPlayerJoinURL(runtime.player.identity);persistPlayer();render();return;
   }
@@ -1294,27 +1458,65 @@ function playerDisconnected(conn=null){
   // Ignore close/error events from a connection we intentionally replaced.
   if(conn && p.conn!==conn)return;
   p.connected=false;stopHeartbeat();
-  if(p.identity?.playerId){p.reconnecting=true;scheduleReconnect();}
-  else if(p.pendingJoin&&p.joining){scheduleJoinRetry();}
+  if(p.identity?.playerId){p.reconnecting=true;scheduleReconnect(true);render();return;}
+  if(p.pendingJoin&&p.joining){
+    // Browsers may emit both error and close for the same failed ICE attempt.
+    // Count that as one retry only.
+    if(conn?.__stadoRetryTriggered)return;
+    if(conn)conn.__stadoRetryTriggered=true;
+    if(p.conn===conn)p.conn=null;
+    scheduleJoinRetry();render();return;
+  }
   render();
 }
-function startHeartbeat(){stopHeartbeat();runtime.player.heartbeat=setInterval(()=>{const p=runtime.player;if(p.conn?.open){send(p.conn,{type:"PING",ts:Date.now()});if(Date.now()-p.lastPong>NETWORK.offlineAfterMs){p.connected=false;p.reconnecting=true;render();}}},NETWORK.heartbeatMs);}
-function stopHeartbeat(){if(runtime.player.heartbeat)clearInterval(runtime.player.heartbeat);runtime.player.heartbeat=null;}
-function scheduleReconnect(){
-  clearTimeout(runtime.player.reconnectTimer);const delays=[1000,2000,4000,8000,15000],n=runtime.player.reconnectAttempt++;
-  runtime.player.reconnectTimer=setTimeout(()=>startPlayerResume(),delays[Math.min(n,delays.length-1)]);
+function startHeartbeat(){
+  stopHeartbeat();runtime.player.heartbeat=setInterval(()=>{
+    const p=runtime.player;if(!p.conn?.open)return;
+    send(p.conn,{type:"PING",ts:Date.now()});
+    if(p.identity&&Date.now()-p.lastPong>NETWORK.offlineAfterMs&&!p.reconnecting){
+      failResumeConnection(p.conn,"heartbeat-timeout");
+    }
+  },NETWORK.heartbeatMs);
 }
-function startPlayerResume(force=false){
+function stopHeartbeat(){if(runtime.player.heartbeat)clearInterval(runtime.player.heartbeat);runtime.player.heartbeat=null;}
+function clearResumeTimers(){const p=runtime.player;clearTimeout(p.resumeOpenTimer);clearTimeout(p.resumeWelcomeTimer);p.resumeOpenTimer=null;p.resumeWelcomeTimer=null;}
+function resumeModeForAttempt(n){const modes=NETWORK.resumeConnectionModes||["all","relay","relay","all"];return modes[Math.min(Math.max(0,n),modes.length-1)]||"relay";}
+function scheduleReconnect(immediate=false){
+  const p=runtime.player;if(!p.identity?.playerId||!p.identity?.resumeKey)return;
+  clearTimeout(p.reconnectTimer);clearResumeTimers();
+  const delays=NETWORK.resumeRetryDelays||[0,700,1600,3000,5000,8000],n=p.reconnectAttempt++;
+  const delay=immediate?0:delays[Math.min(n,delays.length-1)];
+  p.reconnecting=true;p.reconnectTimer=setTimeout(()=>startPlayerResume(false,resumeModeForAttempt(n)),delay);render();
+}
+function failResumeConnection(conn,reason="resume-failed"){
+  const p=runtime.player;if(!p.identity?.playerId||p.conn!==conn)return;
+  clearResumeTimers();stopHeartbeat();p.connected=false;p.reconnecting=true;
+  p.conn=null;try{conn?.close();}catch{}
+  const oldPeer=p.peer;p.peer=null;try{oldPeer?.destroy();}catch{}
+  scheduleReconnect(false);
+}
+function startPlayerResume(force=false,forcedMode=""){
   const p=runtime.player,id=p.identity;if(!id?.roomCode||!id?.playerId||!id?.resumeKey){if(force)toast("Brak klucza automatycznego powrotu. Użyj „Wróć do swojej Owcy”.","error");return;}
-  closePlayerNetwork(false);p.reconnecting=true;render();
-  const peer=createPeer();p.peer=peer;
-  peer.on("open",()=>{const conn=peer.connect(`stado-${id.roomCode}`,{reliable:true,serialization:"json"});p.conn=conn;setupPlayerConn(conn,{resume:true});});
-  peer.on("error",()=>{p.connected=false;p.reconnecting=true;scheduleReconnect();render();});
+  closePlayerNetwork(false);clearResumeTimers();p.reconnecting=true;render();
+  const mode=forcedMode||resumeModeForAttempt(Math.max(0,p.reconnectAttempt-1));p.resumeConnectionMode=mode;
+  const peer=createPeer(null,mode);p.peer=peer;
+  peer.on("open",()=>{
+    if(p.peer!==peer)return;
+    const conn=peer.connect(`stado-${id.roomCode}`,{reliable:true,serialization:"json"});p.conn=conn;setupPlayerConn(conn,{resume:true,connectionMode:mode});
+    clearTimeout(p.resumeOpenTimer);p.resumeOpenTimer=setTimeout(()=>{if(p.conn===conn&&!conn.open&&p.identity)failResumeConnection(conn,`resume-open-timeout-${mode}`);},NETWORK.resumeOpenTimeoutMs||6500);
+  });
+  peer.on("error",()=>{if(p.peer!==peer)return;p.connected=false;p.reconnecting=true;scheduleReconnect(false);render();});
+}
+function kickPlayerReconnect(){
+  const p=runtime.player;if(runtime.role!=="player"||!p.identity?.playerId||p.joining)return;
+  if(p.connected&&p.conn?.open&&Date.now()-p.lastPong<NETWORK.offlineAfterMs)return;
+  if(p.reconnecting&&(p.reconnectTimer||p.peer))return;
+  scheduleReconnect(true);
 }
 function clearJoinTimers(){
   const p=runtime.player;
-  clearTimeout(p.joinRetryTimer);clearTimeout(p.joinWelcomeTimer);
-  p.joinRetryTimer=null;p.joinWelcomeTimer=null;
+  clearTimeout(p.joinRetryTimer);clearTimeout(p.joinWelcomeTimer);clearTimeout(p.joinOpenTimer);
+  p.joinRetryTimer=null;p.joinWelcomeTimer=null;p.joinOpenTimer=null;
 }
 function sendPendingJoin(conn=runtime.player.conn){
   const p=runtime.player;if(!conn?.open||!p.pendingJoin)return false;
@@ -1325,29 +1527,56 @@ function sendPendingJoin(conn=runtime.player.conn){
   },NETWORK.joinWelcomeTimeoutMs);
   return true;
 }
+function joinModeForAttempt(n){
+  const modes=Array.isArray(NETWORK.joinConnectionModes)&&NETWORK.joinConnectionModes.length?NETWORK.joinConnectionModes:["all","relay","relay"];
+  return modes[Math.min(Math.max(0,n),modes.length-1)]||"relay";
+}
+function failJoinConnection(conn,reason="connection-failed"){
+  const p=runtime.player;
+  if(p.identity||!p.pendingJoin||!p.joining||p.conn!==conn||conn.__stadoRetryTriggered)return;
+  conn.__stadoRetryTriggered=true;p.lastJoinError=reason;
+  clearTimeout(p.joinOpenTimer);p.joinOpenTimer=null;
+  p.conn=null;p.connected=false;
+  try{conn.close();}catch{}
+  scheduleJoinRetry();
+}
 function scheduleJoinRetry(){
   const p=runtime.player;if(p.identity||!p.pendingJoin||!p.joining)return;
-  clearTimeout(p.joinWelcomeTimer);clearTimeout(p.joinRetryTimer);
-  const delays=Array.isArray(NETWORK.joinRetryDelays)?NETWORK.joinRetryDelays:[800,2000,4500];
+  clearTimeout(p.joinWelcomeTimer);clearTimeout(p.joinRetryTimer);clearTimeout(p.joinOpenTimer);
+  p.joinWelcomeTimer=null;p.joinOpenTimer=null;
+  const delays=Array.isArray(NETWORK.joinRetryDelays)?NETWORK.joinRetryDelays:[500,1200,2500,4500];
   const n=p.joinRetryAttempt++;
   if(n>=delays.length){
-    p.joining=false;p.joinRetryAttempt=0;
-    toast("Nie udało się połączyć z pokojem. Spróbuj ponownie — możesz też przełączyć Wi‑Fi/dane komórkowe.","error");render();return;
+    p.joining=false;p.joinRetryAttempt=0;p.joinFailed=true;
+    toast("Nie udało się zestawić połączenia przez dane komórkowe. Kliknij „TRYB KOMÓRKOWY / TURN” albo połącz się z Wi‑Fi.","error");render();return;
   }
   p.joinRetryTimer=setTimeout(()=>openJoinConnection(p.pendingJoin.roomCode),delays[n]);
 }
-function openJoinConnection(code){
+function openJoinConnection(code,forcedMode=""){
   const p=runtime.player;if(!p.pendingJoin||p.identity)return;
+  const mode=forcedMode||joinModeForAttempt(p.joinRetryAttempt);
+  p.joinConnectionMode=mode;p.lastJoinError="";
   // Destroy only after the old connection has actually failed/timed out.
   closePlayerNetwork(false);
-  const peer=createPeer();p.peer=peer;
+  const peer=createPeer(null,mode);p.peer=peer;
   peer.on("open",()=>{
     if(p.peer!==peer||!p.pendingJoin)return;
-    const conn=peer.connect(`stado-${code}`,{reliable:true,serialization:"json"});p.conn=conn;setupPlayerConn(conn,{join:true});
+    const conn=peer.connect(`stado-${code}`,{reliable:true,serialization:"json"});p.conn=conn;
+    setupPlayerConn(conn,{join:true,connectionMode:mode});
+    clearTimeout(p.joinOpenTimer);
+    p.joinOpenTimer=setTimeout(()=>{
+      if(p.conn===conn&&!conn.open&&p.joining&&!p.identity)failJoinConnection(conn,`open-timeout-${mode}`);
+    },NETWORK.connectionOpenTimeoutMs||6500);
+    render();
   });
-  peer.on("error",()=>{if(p.peer===peer&&p.pendingJoin&&p.joining)scheduleJoinRetry();});
+  peer.on("error",err=>{
+    if(p.peer!==peer||!p.pendingJoin||!p.joining||peer.__stadoRetryTriggered)return;
+    peer.__stadoRetryTriggered=true;
+    p.lastJoinError=err?.type||err?.message||"peer-error";
+    scheduleJoinRetry();
+  });
 }
-function playerSubmitJoin(){
+function playerSubmitJoin(forceRelay=false){
   const p=runtime.player,code=cleanRoomCode(p.joinDraft.roomCode),name=cleanText(p.joinDraft.name),sid=p.joinDraft.sheepId;
   if(p.joining)return;
   if(code.length!==6){toast("Podaj 6-znakowy kod pokoju.","error");return;}
@@ -1356,12 +1585,13 @@ function playerSubmitJoin(){
   const sh=sheepById(sid);if(!sh||sh.selectable===false){toast("Wybierz dostępną Owcę.","error");return;}
   p.joinAttemptToken=p.joinAttemptToken||randomToken(12);
   p.pendingJoin={roomCode:code,roomId:p.roomInfo?.roomId||p.joinDraft.roomId||"",name,sheepId:sid,joinToken:p.joinAttemptToken};
-  p.joining=true;p.joinRetryAttempt=0;clearJoinTimers();render();
+  p.joining=true;p.joinFailed=false;p.lastJoinError="";p.joinRetryAttempt=forceRelay?1:0;clearJoinTimers();render();
 
   // Best path: reuse the already-open preview WebRTC connection instead of
   // destroying it and doing a second handshake while many people join at once.
-  if(p.conn?.open && p.roomInfo?.roomCode===code){sendPendingJoin(p.conn);return;}
-  openJoinConnection(code);
+  // Manual TURN mode intentionally skips preview so it can force a relay path.
+  if(!forceRelay&&p.conn?.open&&p.roomInfo?.roomCode===code){p.joinConnectionMode="all";sendPendingJoin(p.conn);return;}
+  openJoinConnection(code,forceRelay?"relay":"");
 }
 function playerRequestRecovery(){
   const p=runtime.player,code=cleanRoomCode(p.joinDraft.roomCode),name=cleanText(p.joinDraft.name);
@@ -1398,7 +1628,7 @@ function playerExitToMenu(){
 }
 function closePlayerNetwork(clear=true){
   const p=runtime.player;
-  stopHeartbeat();clearTimeout(p.reconnectTimer);p.reconnectTimer=null;
+  stopHeartbeat();clearTimeout(p.reconnectTimer);p.reconnectTimer=null;clearTimeout(p.joinOpenTimer);p.joinOpenTimer=null;clearResumeTimers();
   const oldConn=p.conn,oldPeer=p.peer;
   // Detach them from runtime before closing so their asynchronous close/error
   // callbacks cannot start a second reconnect/join attempt.
@@ -1444,6 +1674,7 @@ function setBodyMode(){
   document.body.classList.toggle("host-game",runtime.role==="host" && !!r && ["ROUND","FINAL"].includes(r.status));
 }
 function logoHTML(){return `<div class="logo">ST<span class="pink">ADO</span></div>`;}
+function versionHTML(){return `<span class="app-version">STADO v${APP_VERSION}</span>`;}
 function imgHTML(src,alt="",cls=""){return src?`<img class="${cls}" src="${escAttr(src)}" alt="${escAttr(alt)}" onerror="this.style.visibility='hidden'">`:"";}
 function sheepImg(pl,big=false,cls=""){const s=sheepById(pl?.sheepId);return imgHTML(big?s.bigAvatar:s.smallAvatar,s.name,cls);}
 function sheepType(pl){return sheepById(pl?.sheepId).name||"Owca";}
@@ -1463,7 +1694,7 @@ function renderStart(){
       </article>
       <div class="scene-wrap"><img src="assets/scenes/start.png" alt="Stado" onerror="this.parentElement.classList.add('scene-fallback');this.remove()"></div>
     </section>
-    <div class="spread"><button class="btn ghost" data-action="how">ⓘ Jak to działa?</button><div class="sheep-runway">${[0,1,2].map((_,i)=>`<i class="css-sheep" style="animation-delay:${-i*2.8}s"></i>`).join("")}<i class="css-sheep black" style="animation-delay:-4s"></i></div></div>
+    <div class="spread"><button class="btn ghost" data-action="how">ⓘ Jak to działa?</button><div class="row start-footer-right"><div class="sheep-runway footer-runway">${[0,1,2].map((_,i)=>`<i class="css-sheep" style="animation-delay:${-i*2.8}s"></i>`).join("")}<i class="css-sheep black" style="animation-delay:-4s"></i></div>${versionHTML()}</div></div>
   </main>`;
 }
 
@@ -1478,8 +1709,10 @@ function renderHost(){
 }
 
 function renderConfig(room=null){
-  const cfg=room?room.config:runtime.configDraft;
-  const fake=room||makeRoom(cfg,"------","preview");
+  // Konfiguracja jest edytowana w configDraft także wtedy, gdy pokój już istnieje.
+  // Dzięki temu zmiana trybu/liczby odpowiedzi/timera po „Ustaw grę od nowa” działa od razu.
+  const cfg=runtime.configDraft;
+  const fake=room?{...room,config:{...cfg}}:makeRoom(cfg,"------","preview");
   const pf=preflight(fake);
   const suggested=`3–4 Owce → 3 • 5–8 → 4 • 9–12 → 5`;
   return `<main class="app-shell">
@@ -1489,13 +1722,16 @@ function renderConfig(room=null){
         <h1 class="section-title">Ustaw grę</h1>
         <label class="form-label">Liczba rund: <b id="roundValue">${cfg.roundsPlanned}</b></label>
         <div class="range-row"><input id="rounds" type="range" min="3" max="30" value="${cfg.roundsPlanned}"><span>3–30</span></div>
+        <label class="form-label" style="margin-top:18px">⏱ Limit czasu na ruch: <b id="responseTimeValue">${formatTimeSetting(cfg.responseTimeSec??60)}</b></label>
+        <div class="range-row"><input id="responseTime" type="range" min="20" max="120" step="10" value="${clamp(+(cfg.responseTimeSec??60),20,120)}"><span>20 s – 2 min</span></div>
+        <p class="muted small">Dotyczy wpisywania odpowiedzi/pytania i głosowania. Brak głosu w czasie = 0 pkt w tej rundzie. Polowanie Wilka na osobę bez głosu jest neutralne.</p>
         <h3 class="subhead" style="margin-top:22px">Jak grubo gramy?</h3>
         <div class="mode-cards">${Object.entries(MODE).map(([key,m])=>`<button class="mode-card ${cfg.mode===key?"active":""}" data-action="mode" data-value="${key}"><span class="mode-kicker">${esc(m.short)}</span><b>${modeIcon(key)} ${esc(m.label)}</b><small>${esc(m.desc)}</small></button>`).join("")}</div>
         <h3 class="subhead" style="margin-top:22px">Liczba odpowiedzi</h3>
         <div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div>
         <p class="muted small">${suggested}. Jeżeli dołączy mniej graczy niż wybrano odpowiedzi, liczba odpowiedzi spada do liczby aktywnych Owiec.</p>
         <div class="info-item"><label class="spread"><span><b>🐺 Tryb Wilka</b><br><small class="muted">Tajna minigra po oddaniu głosu</small></span><span class="switch"><input type="checkbox" ${cfg.wolfEnabled?"checked":""} data-action="wolf-toggle"><span></span></span></label></div>
-        <div class="row wrap" style="margin-top:20px"><button class="btn" data-action="create-room">${room?"ZAPISZ I WRÓĆ DO LOBBY":"UTWÓRZ POKÓJ"}</button>${!room?`<button class="btn light" data-action="back-start">Wróć</button>`:""}</div>
+        <div class="row wrap" style="margin-top:20px"><button class="btn" data-action="create-room">${room?"ZAPISZ I WRÓĆ DO LOBBY":"UTWÓRZ POKÓJ"}</button>${!room?`<button class="btn light" data-action="back-start">Wróć</button>`:""}</div><div style="margin-top:14px">${versionHTML()}</div>
       </article>
       <article class="card pad">
         <h2 class="section-title">${modeIcon(cfg.mode)} ${esc(MODE[cfg.mode].label)}</h2>
@@ -1530,12 +1766,12 @@ function renderLobby(r){
       <div class="room-join"><div class="center"><div class="room-code">${esc(r.roomCode)}</div><div class="muted">Kod pokoju</div><div class="small muted">${esc(joinDisplayURL(r))}</div></div><div id="qrBox" data-qr="${escAttr(url)}"></div><div><b>Jak dołączyć?</b><ol><li>Zeskanuj QR albo otwórz stronę.</li><li>Wpisz kod <b>${esc(r.roomCode)}</b>.</li><li>Wybierz imię i wolną Owcę.</li></ol></div></div>
       <div class="player-lobby-grid">${aps.map(p=>renderLobbyPlayer(p)).join("")}${Array.from({length:Math.max(0,Math.min(12,6)-aps.length)},()=>`<div class="lobby-player" style="opacity:.28"><div>＋</div><div><div class="name">Czeka na Owcę…</div><div class="type">Dołącz telefonem</div></div></div>`).join("")}</div>
       <div class="lobby-actions"><button class="btn" data-action="start-match" ${canStart?"":"disabled"}>START (${aps.length} ${aps.length===1?"owca":"owiec"})</button><button class="btn secondary" data-action="add-bot">+ Dodaj Owcę testową</button><button class="btn secondary" data-action="back-config">← Ustawienia gry</button></div>
-      <p class="muted small">Minimum 3, maksimum 12. Gra nie wystartuje, jeśli któryś prawdziwy gracz jest rozłączony. BOT-y służą wyłącznie do testowania rozgrywki.</p>
+      <p class="muted small lobby-note">Minimum 3, maksimum 12. Gra nie wystartuje, jeśli któryś prawdziwy gracz jest rozłączony. BOT-y służą wyłącznie do testowania rozgrywki. <span class="lobby-version">${versionHTML()}</span></p>
     </section>
     <div class="sheep-runway">${[0,1,2].map((_,i)=>`<i class="css-sheep" style="animation-delay:${-i*2.7}s"></i>`).join("")}<i class="css-sheep black" style="animation-delay:-3s"></i></div>
   </main>`;
 }
-function renderLobbyPlayer(p){return `<div class="lobby-player ${p.isBot?"bot":""} ${p.connected||p.isBot?"":"offline"}">${sheepImg(p)}<div><div class="name">${esc(p.name)}</div><div class="type">${esc(sheepType(p))}</div><div class="small muted">${p.connected||p.isBot?`<i class="dot-online"></i> gotowa`:`<i class="dot-offline"></i> offline`}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}" title="Usuń">×</button></div>`;}
+function renderLobbyPlayer(p){return `<div class="lobby-player ${p.isBot?"bot":""} ${p.connected||p.isBot?"":"offline"}">${sheepImg(p)}<div class="lobby-player-main"><div class="name" title="${escAttr(p.name)}">${esc(p.name)}</div><div class="type" title="${escAttr(sheepType(p))}">${esc(sheepType(p))}</div><div class="small muted lobby-status">${p.connected||p.isBot?`<i class="dot-online"></i> gotowa`:`<i class="dot-offline"></i> offline`}</div></div><button class="btn ghost lobby-remove" data-action="remove-player" data-id="${p.playerId}" title="Usuń ${escAttr(p.name)}" aria-label="Usuń ${escAttr(p.name)}">×</button></div>`;}
 
 function renderPrologue(r){
   const i=r.match?.prologueIndex||0;
@@ -1545,11 +1781,14 @@ function renderPrologue(r){
 function renderHostGame(r){
   const c=currentAttempt(r),aps=activePlayers(r),phase=c?.phase||"";
   const mode=MODE[r.config.mode];
+  // The left column is a live scoreboard: highest score stays at the top.
+  // Sorting a copy keeps gameplay/player order untouched. Ties keep join order.
+  const scoreboard=aps.slice().sort((a,b)=>(b.points||0)-(a.points||0)||(a.joinedAt||0)-(b.joinedAt||0));
   const hostAvatarPx=aps.length<=5?82:aps.length<=7?74:aps.length<=8?68:aps.length<=9?62:aps.length<=10?56:48;
   return `<main class="host-root">
-    <header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span><span class="badge pink">${modeIcon(r.config.mode)} ${esc(mode.label)}</span>${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 Baran: ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
+    <header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span>${countdownHTML(c)}<span class="badge pink">${modeIcon(r.config.mode)} ${esc(mode.label)}</span>${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 Baran: ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
     <section class="host-grid">
-      <aside class="host-side host-left"><div class="host-panel"><h3>Owce: ${aps.length}/${MAX_PLAYERS}</h3></div><div class="host-panel"><div class="host-player-list" style="--players:${Math.max(aps.length,1)};--host-avatar:${hostAvatarPx}px">${aps.map(p=>renderHostPlayer(p,c)).join("")}</div></div></aside>
+      <aside class="host-side host-left"><div class="host-panel"><h3>Owce: ${aps.length}/${MAX_PLAYERS} <span class="small muted">• ranking</span></h3></div><div class="host-panel"><div class="host-player-list" style="--players:${Math.max(aps.length,1)};--host-avatar:${hostAvatarPx}px">${scoreboard.map(p=>renderHostPlayer(p,c)).join("")}</div></div></aside>
       <main class="host-center">
         <div class="main-scene"><img src="assets/scenes/glowne.png" alt="STADO — główna scena"></div>
         ${renderHostQuestion(c,r)}
@@ -1621,6 +1860,7 @@ function renderHostStatus(c,r){
   }else if(c.phase==="VOTING"||c.phase==="READY_TO_REVEAL"){
     const done=Object.keys(c.votes||{}).length,total=activePlayers(r).length;
     lines.push(`🗳 Gotowych: ${done}/${total} Owiec.`);
+    if((c.timedOutPlayerIds||[]).length)lines.push(`⏱ Bez głosu w czasie: ${(c.timedOutPlayerIds||[]).length}.`);
     if(r.config.wolfEnabled)lines.push(`🐺 Tajna rola Wilka jest rozliczana bez ujawniania tożsamości.`);
     if(c.phase==="READY_TO_REVEAL")lines.push(`✅ Wszystkie decyzje zapisane. Można pokazać wyniki.`);
   }else if(c.phase==="RESULT"){
@@ -1675,8 +1915,9 @@ function renderJoin(){
     <label class="form-label" style="margin-top:12px">Twoje imię</label><input class="input" data-field="playerName" value="${escAttr(p.joinDraft.name)}" placeholder="Np. Mati" autocomplete="off">
     ${info?`<p class="${info.status==="LOBBY"?"success-text":"error-text"}">${info.status==="LOBBY"?`Pokój znaleziony • ${info.count}/${info.max} Owiec`:`Gra już wystartowała — możesz tylko wrócić do swojej Owcy.`}</p>`:`<p class="muted small">Po wpisaniu pełnego kodu sprawdzimy pokój.</p>`}
     <h2>Wybierz swoją Owcę</h2><div class="big-sheep-list">${selectable.map(sh=>{const taken=occupied.has(String(sh.id)),sel=p.joinDraft.sheepId===String(sh.id);return `<button class="big-sheep-card ${taken?"taken":""} ${sel?"selected":""}" data-action="select-sheep" data-id="${escAttr(sh.id)}" ${taken?"disabled":""}>${imgHTML(sh.bigAvatar,sh.name)}${taken?`<span class="taken-label">ZAJĘTA</span>`:""}<div class="caption"><strong>${esc(sh.name)}</strong><p>${esc(sh.description||"")}</p></div></button>`;}).join("")}</div>
-    <div class="sticky-action"><button class="btn" data-action="submit-join" ${p.joining||(info&&info.status!=="LOBBY")?"disabled":""}>${p.joining?"ŁĄCZENIE…":"DOŁĄCZ"}</button></div>
-    <div class="hint-box" style="margin-top:14px"><b>Telefon się zmienił albo straciłeś dane powrotu?</b><br><button class="btn ghost" data-action="toggle-recover">Wróć do swojej Owcy</button>${p.joinDraft.recover?`<div class="stack" style="margin-top:10px"><p class="small muted">Wpisz kod i dokładnie to samo imię. Prowadzący zatwierdzi przejęcie Owcy na tym urządzeniu.</p><button class="btn cyan" data-action="submit-recover" ${p.waitingRecovery?"disabled":""}>${p.waitingRecovery?"Czekamy na prowadzącego…":"WYŚLIJ PROŚBĘ"}</button></div>`:""}</div>
+    <div class="sticky-action"><button class="btn" data-action="submit-join" ${p.joining||(info&&info.status!=="LOBBY")?"disabled":""}>${p.joining?(p.joinConnectionMode==="relay"?"ŁĄCZENIE PRZEZ TURN…":"ŁĄCZENIE…"):"DOŁĄCZ"}</button></div>
+    ${p.joinFailed?`<div class="hint-box" style="margin-top:12px"><b>📶 Dane komórkowe blokują połączenie bezpośrednie?</b><p class="small">Uruchom tryb zgodności, który wymusza połączenie przez serwer TURN na porcie 443.</p><button class="btn cyan" data-action="submit-join-relay">TRYB KOMÓRKOWY / TURN</button></div>`:""}
+    <div class="hint-box" style="margin-top:14px"><b>Telefon się zmienił albo straciłeś dane powrotu?</b><br><button class="btn ghost" data-action="toggle-recover">Wróć do swojej Owcy</button>${p.joinDraft.recover?`<div class="stack" style="margin-top:10px"><p class="small muted">Wpisz kod i dokładnie to samo imię. Prowadzący zatwierdzi przejęcie Owcy na tym urządzeniu.</p><button class="btn cyan" data-action="submit-recover" ${p.waitingRecovery?"disabled":""}>${p.waitingRecovery?"Czekamy na prowadzącego…":"WYŚLIJ PROŚBĘ"}</button></div>`:""}</div><div class="center" style="margin-top:12px">${versionHTML()}</div>
   </section></main>`;
 }
 function renderPlayerConnecting(){return `<main class="phone-shell"><div class="phone-top">${logoHTML()}</div><section class="card phone-wait"><h1>Wracamy do Stada…</h1><div class="wait-dots"><i></i><i></i><i></i></div><p class="muted">Przywracamy Twój profil, punkty i bieżącą rundę.</p><button class="btn secondary" data-action="player-reconnect">Połącz ponownie</button></section></main>`;}
@@ -1684,7 +1925,7 @@ function renderPhoneLobbyWait(s){return renderPhoneWait("Jesteś w Stadzie!","Cz
 function renderPhoneWait(title,text,img,extra=""){return `<div class="phone-wait"><h1>${esc(title)}</h1><p>${esc(text)}</p>${img?`<img src="${escAttr(img)}" alt="Czekające Owce">`:""}<div class="wait-dots"><i></i><i></i><i></i></div>${extra?`<b>${esc(extra)}</b>`:""}</div>`;}
 function renderPhoneRound(s){
   const c=s.match?.current;if(!c)return renderPhoneWait("Przygotowanie rundy…","Spójrz na ekran główny.","assets/phone/czekatel.png");
-  const rp=`<div class="round-pill">RUNDA ${c.number}/${s.match.plannedRounds}</div>`;
+  const rp=`<div class="phone-round-head"><div class="round-pill">RUNDA ${c.number}/${s.match.plannedRounds}</div>${countdownHTML(c,true)}</div>`;
   if(c.phase==="QUESTION_INPUT"){
     if(c.isRam)return rp+renderQuestionAuthor(c,s);
     return rp+renderPhoneWait("Baran układa pytanie…","Czekasz na przygotowanie rundy.","assets/phone/czekatel.png");
@@ -1736,7 +1977,7 @@ function renderWolf(c,s){
 }
 function renderPhoneRoundResult(c,s){
   const x=c.settlement,L=x?.ledger;if(!x||!L)return renderPhoneWait("Wyniki rundy","Spójrz na ekran główny.","assets/phone/czekatel.png");
-  const baseText=L.voteAward==="black"?"Czarna Owca":L.voteAward==="herd"?"Największe Stado":L.voteAward==="tie"?"Remis największych Stad":"Poza punktami";
+  const baseText=L.timedOut?"Brak głosu w czasie":L.voteAward==="black"?"Czarna Owca":L.voteAward==="herd"?"Największe Stado":L.voteAward==="tie"?"Remis największych Stad":"Poza punktami";
   return `<div class="result-box"><h2>Wynik rundy</h2><div class="result-row"><span>Twój głos</span><b>${baseText}</b></div><div class="result-row"><span>Punkty za głos${L.tokenUsed?" z Żetonem ×2":""}</span><b>${signed(L.votePoints||0)}</b></div>${L.authorToken?`<div class="result-row"><span>Twoja odpowiedź wygrała</span><b>+${L.authorToken} 🧶</b></div>`:""}${L.wolfDelta?`<div class="result-row"><span>Rozliczenie Wilka</span><b>${signed(L.wolfDelta)} pkt</b></div>`:""}<div class="result-row"><span>Stan po rundzie</span><b>${L.after} pkt • 🧶 ${s.self.tokens}</b></div>${x.wolfResult?`<div class="hint-box" style="margin-top:12px">${wolfResultTextFromSnapshot(s,c,x.wolfResult)}</div>`:""}<p class="muted center">Następną rundę uruchamia prowadzący.</p></div>`;
 }
 function renderPhoneFinal(s){
@@ -1781,10 +2022,10 @@ function renderModal(){
 function removeModalNode(){document.getElementById("modal-root")?.remove();}
 function confirmModal(title,text,onConfirm){runtime.modal={type:"confirm",title,text,onConfirm};render();}
 function renderSettingsModal(){
-  if(runtime.role==="player")return `<div class="modal card"><h2>⚙ Ustawienia telefonu</h2><div class="info-list"><div class="info-item">Połączenie: <b>${runtime.player.connected?"online":"offline"}</b></div><div class="info-item">Telefon gracza nie odtwarza muzyki ani efektów dźwiękowych.</div></div><div class="modal-actions"><button class="btn secondary" data-action="player-reconnect">Połącz ponownie</button><button class="btn ghost" data-action="player-menu">Wyjdź do menu</button><button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
+  if(runtime.role==="player")return `<div class="modal card"><h2>⚙ Ustawienia telefonu</h2><div class="info-list"><div class="info-item">Połączenie: <b>${runtime.player.connected?"online":"offline"}</b></div><div class="info-item">Wersja: <b>${APP_VERSION}</b></div><div class="info-item">Telefon gracza nie odtwarza muzyki ani efektów dźwiękowych.</div></div><div class="modal-actions"><button class="btn secondary" data-action="player-reconnect">Połącz ponownie</button><button class="btn ghost" data-action="player-menu">Wyjdź do menu</button><button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
   const r=runtime.host.room;
   const volume=Math.round(runtime.audio.volume*100);
-  return `<div class="modal card"><h2>⚙ Ustawienia</h2><label class="form-label">Głośność muzyki</label><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1"><label class="row" style="margin-top:10px"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label>${r?`<div class="info-item" style="margin-top:14px"><b>Pokój ${esc(r.roomCode)}</b><div id="settingsQR" data-qr="${escAttr(joinURL(r))}" style="width:150px;height:150px;background:#fff;padding:8px;border-radius:12px;margin:10px auto"></div><div class="small center muted">Zeskanuj, aby wrócić do pokoju.</div></div><div class="manage-list">${activePlayers(r).map(p=>`<div class="manage-row">${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))} • ${p.connected||p.isBot?"online":"offline"}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}">Usuń</button></div>`).join("")}</div>`:""}<div class="modal-actions">${r&&["ROUND","PROLOGUE"].includes(r.status)?`<button class="btn secondary" data-action="pause">${r.paused?"Wznów":"Pauza"}</button>`:""}${r&&r.status==="ROUND"&&r.match?.current&&!r.match.current.settlement?`<button class="btn secondary" data-action="abort-round">Pomiń pytanie</button>`:""}${r?`<button class="btn yellow" data-action="settings-new-game">↻ USTAW GRĘ OD NOWA</button>`:""}${r?`<button class="btn danger" data-action="settings-exit-menu">WYJDŹ DO MENU GŁÓWNEGO</button>`:""}<button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
+  return `<div class="modal card"><h2>⚙ Ustawienia <span class="app-version">v${APP_VERSION}</span></h2><label class="form-label">Głośność muzyki</label><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1"><label class="row" style="margin-top:10px"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label><div class="row wrap" style="margin-top:12px"><button class="btn cyan" data-action="music-enable">▶ WŁĄCZ / TESTUJ MUZYKĘ</button><span class="small muted">Aktualny utwór: ${runtime.audio.track||1}${runtime.audio.pendingTrack?" • oczekuje na odblokowanie":""}</span></div>${r?`<div class="info-item" style="margin-top:14px"><b>Pokój ${esc(r.roomCode)}</b><div id="settingsQR" data-qr="${escAttr(joinURL(r))}" style="width:150px;height:150px;background:#fff;padding:8px;border-radius:12px;margin:10px auto"></div><div class="small center muted">Zeskanuj, aby wrócić do pokoju.</div></div><div class="manage-list">${activePlayers(r).map(p=>`<div class="manage-row">${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))} • ${p.connected||p.isBot?"online":"offline"}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}">Usuń</button></div>`).join("")}</div>`:""}<div class="modal-actions">${r&&["ROUND","PROLOGUE"].includes(r.status)?`<button class="btn secondary" data-action="pause">${r.paused?"Wznów":"Pauza"}</button>`:""}${r&&r.status==="ROUND"&&r.match?.current&&!r.match.current.settlement?`<button class="btn secondary" data-action="abort-round">Pomiń pytanie</button>`:""}${r?`<button class="btn yellow" data-action="settings-new-game">↻ USTAW GRĘ OD NOWA</button>`:""}${r?`<button class="btn danger" data-action="settings-exit-menu">WYJDŹ DO MENU GŁÓWNEGO</button>`:""}<button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
 }
 function afterModalRender(){document.querySelectorAll("[data-qr]").forEach(renderQRNode);}
 
@@ -1795,7 +2036,28 @@ function connectionOverlay(){return `<div class="connection-overlay"><div class=
 
 function afterRender(){
   document.querySelectorAll("[data-qr]").forEach(renderQRNode);
-  if(runtime.role==="host")requestWakeLock();
+  updateCountdownNodes();
+  if(runtime.role==="host"){
+    requestWakeLock();
+    fitHostAnswerText();
+  }
+}
+function fitHostAnswerText(){
+  document.querySelectorAll(".answer-card .answer-text").forEach(text=>{
+    const card=text.closest(".answer-card");
+    if(!card||!card.clientWidth||!card.clientHeight)return;
+    text.style.fontSize="";
+    const maxSize=Math.min(32,Math.max(18,Math.min(card.clientWidth*.085,card.clientHeight*.24)));
+    const minSize=11;
+    let low=minSize,high=maxSize,best=minSize;
+    for(let i=0;i<8;i++){
+      const mid=(low+high)/2;
+      text.style.fontSize=`${mid}px`;
+      const fits=card.scrollHeight<=card.clientHeight+1 && card.scrollWidth<=card.clientWidth+1;
+      if(fits){best=mid;low=mid;}else high=mid;
+    }
+    text.style.fontSize=`${Math.floor(best*10)/10}px`;
+  });
 }
 function renderQRNode(el){
   if(!el||el.dataset.done)return;const value=el.dataset.qr;if(!value)return;el.dataset.done="1";
@@ -1807,19 +2069,91 @@ function syncAudioElements(){for(let i=1;i<=4;i++){const el=document.getElementB
 function setAudioVolume(v){runtime.audio.volume=clamp(v,0,1);syncAudioElements();saveAudioPrefs();}
 function setMuted(v){runtime.audio.muted=!!v;syncAudioElements();saveAudioPrefs();render();}
 function saveAudioPrefs(){try{localStorage.setItem(AUDIO_STORAGE_KEY,JSON.stringify({volume:runtime.audio.volume,muted:runtime.audio.muted}));}catch{}}
+
+function primeMusicTrack(n){
+  if(runtime.role==="player")return;
+  const el=document.getElementById(`music${n}`);
+  if(!el || !el.paused || runtime.audio.track===n)return;
+  const oldVolume=el.volume, oldMuted=el.muted;
+  try{
+    el.muted=false;
+    el.volume=0;
+    const p=el.play();
+    if(p&&typeof p.then==="function"){
+      p.then(()=>{
+        el.pause();
+        try{el.currentTime=0;}catch{}
+        el.muted=oldMuted;
+        el.volume=runtime.audio.muted?0:runtime.audio.volume;
+      }).catch(()=>{
+        el.muted=oldMuted;
+        el.volume=oldVolume;
+      });
+    }else{
+      el.pause();
+      try{el.currentTime=0;}catch{}
+      el.muted=oldMuted;
+      el.volume=runtime.audio.muted?0:runtime.audio.volume;
+    }
+  }catch{
+    el.muted=oldMuted;
+    el.volume=oldVolume;
+  }
+}
+
 function playMusic(n,force=false){
-  if(runtime.role==="player")return;runtime.audio.track=n;syncAudioElements();
-  for(let i=1;i<=4;i++){const el=document.getElementById(`music${i}`);if(!el)continue;if(i!==n){el.pause();el.currentTime=0;}}
-  const el=document.getElementById(`music${n}`);if(!el)return;el.loop=true;el.volume=runtime.audio.muted?0:runtime.audio.volume;
-  if(el.paused||force)el.play().catch(()=>{if(force)toast("Przeglądarka zablokowała muzykę. Kliknij ponownie po interakcji z ekranem.","error");});
+  if(runtime.role==="player")return;
+  runtime.audio.track=n;
+  syncAudioElements();
+  for(let i=1;i<=4;i++){
+    const el=document.getElementById(`music${i}`);
+    if(!el)continue;
+    if(i!==n){
+      el.pause();
+      try{el.currentTime=0;}catch{}
+    }
+  }
+  const el=document.getElementById(`music${n}`);
+  if(!el)return;
+  el.loop=true;
+  el.muted=false;
+  el.volume=runtime.audio.muted?0:runtime.audio.volume;
+  if(!el.paused&&!force){runtime.audio.pendingTrack=0;return;}
+  const promise=el.play();
+  if(promise&&typeof promise.then==="function"){
+    promise.then(()=>{
+      runtime.audio.pendingTrack=0;
+      runtime.audio.lastError="";
+    }).catch(err=>{
+      runtime.audio.pendingTrack=n;
+      runtime.audio.lastError=String(err?.name||err?.message||"audio");
+      if(force)toast("Muzyka została zablokowana przez przeglądarkę. Kliknij „Włącz / testuj muzykę” w Ustawieniach.","error");
+    });
+  }
 }
 function pauseCurrentMusic(){const el=document.getElementById(`music${runtime.audio.track}`);if(el)el.pause();}
-function pauseAllMusic(){for(let i=1;i<=4;i++){const el=document.getElementById(`music${i}`);if(el){el.pause();el.currentTime=0;}}runtime.audio.track=0;}
+function pauseAllMusic(){for(let i=1;i<=4;i++){const el=document.getElementById(`music${i}`);if(el){el.pause();try{el.currentTime=0;}catch{}}}runtime.audio.track=0;runtime.audio.pendingTrack=0;}
 async function requestWakeLock(){if(runtime.role!=="host"||!runtime.host.room||runtime.host.wakeLock||!navigator.wakeLock?.request)return;try{runtime.host.wakeLock=await navigator.wakeLock.request("screen");runtime.host.wakeLock.addEventListener("release",()=>runtime.host.wakeLock=null);}catch{}}
 function releaseWakeLock(){try{runtime.host.wakeLock?.release();}catch{}runtime.host.wakeLock=null;}
 
 /* -------------------- UTILITIES -------------------- */
 
+
+
+function formatTimeSetting(sec){sec=clamp(+sec,20,120);return sec<60?`${sec} s`:sec===60?"1 min":sec===120?"2 min":`${Math.floor(sec/60)} min ${sec%60} s`;}
+function countdownHTML(c,compact=false){
+  if(!c?.phaseDeadlineAt||!isTimedPhase(c.phase))return "";
+  const left=Math.max(0,Math.ceil((c.phaseDeadlineAt-Date.now())/1000));
+  return `<span class="countdown ${compact?"compact":""} ${left<=10?"urgent":""}" data-deadline="${c.phaseDeadlineAt}">⏱ <b data-countdown-text>${formatCountdownSeconds(left)}</b></span>`;
+}
+function formatCountdownSeconds(sec){sec=Math.max(0,Math.ceil(+sec||0));return `${Math.floor(sec/60)}:${String(sec%60).padStart(2,"0")}`;}
+function updateCountdownNodes(){
+  const now=Date.now();document.querySelectorAll("[data-deadline]").forEach(el=>{
+    const deadline=+el.dataset.deadline||0,left=Math.max(0,Math.ceil((deadline-now)/1000));
+    const text=el.querySelector("[data-countdown-text]");if(text)text.textContent=formatCountdownSeconds(left);
+    el.classList.toggle("urgent",left<=10);
+  });
+}
 
 function setPlayerJoinURL(identity){try{const u=new URL(location.href);u.search="";u.hash="";u.searchParams.set("room",identity.roomCode);u.searchParams.set("roomId",identity.roomId);history.replaceState(null,"",u.pathname+u.search);}catch{}}
 function clearJoinURL(){try{history.replaceState(null,"",location.pathname);}catch{}}
@@ -1847,13 +2181,15 @@ function joinURL(r){const u=new URL(location.href);u.search="";u.hash="";u.searc
 function joinDisplayURL(r){return `${location.host}${location.pathname}?room=${r.roomCode}`;}
 function optionLabel(c,o,short=false){if(!o)return "—";if(c.type==="which_sheep"){const p=playerById(o.candidatePlayerId);return p?.name||"Owca";}return short?truncate(o.text,50):o.text;}
 function wolfResultText(r,c,w){
-  const wolf=playerById(w.wolfPlayerId,r);if(w.skip)return `🐺 ${esc(wolf?.name||"Wilk")} zrezygnował z polowania.`;
+  const wolf=playerById(w.wolfPlayerId,r);if(w.skip)return `🐺 ${esc(wolf?.name||"Wilk")} ${w.timedOut?"nie zdążył z polowaniem — bez zmian.":"zrezygnował z polowania."}`;
   const target=playerById(w.targetPlayerId,r),pred=optionLabel(c,c.options.find(o=>o.optionId===w.predictedOptionId),true);
+  if(w.neutral)return `🐺 Polowanie ${esc(wolf?.name||"Wilka")} na ${esc(target?.name||"Owcę")} jest neutralne — cel nie oddał głosu w czasie.`;
   return w.hit?`🐺 ${esc(wolf?.name||"Wilk")} trafił głos ${esc(target?.name||"Owcy")} (${esc(pred)}): +1 dla Wilka, −${w.targetLoss} dla celu.`:`🐺 ${esc(wolf?.name||"Wilk")} chybił typ głosu ${esc(target?.name||"Owcy")}: −${Math.abs(w.delta)} pkt.`;
 }
 function wolfResultTextFromSnapshot(s,c,w){
   const wolf=s.players.find(p=>p.playerId===w.wolfPlayerId),target=s.players.find(p=>p.playerId===w.targetPlayerId);
-  if(w.skip)return `🐺 ${wolf?.name||"Wilk"} zrezygnował z polowania.`;
+  if(w.skip)return `🐺 ${wolf?.name||"Wilk"} ${w.timedOut?"nie zdążył z polowaniem — bez zmian.":"zrezygnował z polowania."}`;
+  if(w.neutral)return `🐺 Polowanie ${wolf?.name||"Wilka"} na ${target?.name||"Owcę"} jest neutralne — cel nie oddał głosu w czasie.`;
   return w.hit?`🐺 ${wolf?.name||"Wilk"} przewidział głos ${target?.name||"Owcy"}: Wilk +1, cel −${w.targetLoss}.`:`🐺 ${wolf?.name||"Wilk"} nie przewidział głosu ${target?.name||"Owcy"} i traci ${Math.abs(w.delta)} pkt.`;
 }
 function toast(text,type="good"){const el=document.createElement("div");el.className=`toast ${type}`;el.textContent=text;toastRoot.appendChild(el);setTimeout(()=>el.remove(),4200);}
