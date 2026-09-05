@@ -202,6 +202,9 @@ body.host-game{overflow:hidden}
 .sheep-option .name{font-size:clamp(9px,.9vw,14px);font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%}
 .sheep-option .type{font-size:clamp(7px,.65vw,10px);color:#c8cce0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%}
 .sheep-option.winner{border-color:var(--yellow);box-shadow:0 0 0 2px rgba(255,200,61,.4)}
+.sheep-option.result{align-content:center;gap:1px;padding:5px}
+.which-voters{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;align-content:flex-start;gap:2px;width:100%;max-width:100%;margin-top:2px;overflow:hidden}
+.which-voters .voter-chip{font-size:clamp(6px,.55vw,9px);line-height:1.15;padding:2px 4px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:rgba(0,0,0,.26);border:1px solid rgba(255,255,255,.12)}
 .host-status-line{display:flex;gap:8px;align-items:center;justify-content:center;min-height:32px}
 .progressbar{height:7px;background:rgba(255,255,255,.1);border-radius:99px;overflow:hidden;flex:1}
 .progressbar span{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--pink));width:var(--pct)}

@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.0.13";
+const APP_VERSION = "1.0.14";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -1836,7 +1836,11 @@ function renderTextOptions(c,r){
 function renderWhichGrid(c,r){
   const n=c.options.length,cols=n<=4?n:Math.ceil(n/2),result=c.settlement;
   const whichAvatarPx=n<=5?122:n<=6?112:n<=8?98:n<=10?84:72;
-  return `<div class="which-grid" style="--cols:${cols};--which-avatar:${whichAvatarPx}px">${c.options.map(o=>{const pl=playerById(o.candidatePlayerId,r),win=result?.topOptionIds?.includes(o.optionId),count=result?.counts?.[o.optionId]||0;return `<div class="sheep-option ${win?"winner":""}">${sheepImg(pl)}<div class="name">${esc(pl?.name||"Owca")}</div><div class="type">${esc(sheepType(pl))}</div>${result?`<b>${count} ${count===1?"głos":"głosów"}</b>`:""}</div>`;}).join("")}</div>`;
+  return `<div class="which-grid ${result?"result":""}" style="--cols:${cols};--which-avatar:${whichAvatarPx}px">${c.options.map(o=>{
+    const pl=playerById(o.candidatePlayerId,r),win=result?.topOptionIds?.includes(o.optionId),count=result?.counts?.[o.optionId]||0;
+    const voters=result?(result.voterMap?.[o.optionId]||[]).map(pid=>playerById(pid,r)?.name||"?"):[];
+    return `<div class="sheep-option ${win?"winner":""} ${result?"result":""}">${sheepImg(pl)}<div class="name">${esc(pl?.name||"Owca")}</div><div class="type">${esc(sheepType(pl))}</div>${result?`<b>${count} ${count===1?"głos":"głosów"}</b><div class="which-voters" aria-label="Głosowali na tę Owcę">${voters.map(name=>`<span class="voter-chip" title="${escAttr(name)}">${esc(name)}</span>`).join("")}</div>`:""}</div>`;
+  }).join("")}</div>`;
 }
 function renderHostBottomActions(c,r){
   if(!c)return "";
