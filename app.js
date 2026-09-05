@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.0.6";
+const APP_VERSION = "1.0.7";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -16,9 +16,9 @@ const COLORS = [
   {letter:"E", key:"e", hex:"#61d69b"}
 ];
 const MODE = {
-  warmup: {label:"Rozgrzewka", short:"Delikatnie", music:2, desc:"Gotowe pytania i odpowiedzi"},
-  freestyle: {label:"Freestyle", short:"Po 2 drinkach", music:3, desc:"Pytania z gry, odpowiedzi od Was"},
-  hardcore: {label:"Hardcore", short:"Podwójny freestyle", music:4, desc:"Sami tworzycie pytania i odpowiedzi"}
+  warmup: {label:"Rozgrzewka", short:"Na trzeźwo", music:2, desc:"Gotowe pytania i odpowiedzi"},
+  freestyle: {label:"Freestyle", short:"Po dwóch drinkach", music:3, desc:"Pytania z gry, odpowiedzi od Was"},
+  hardcore: {label:"Hardcore", short:"Hardcore", music:4, desc:"Sami tworzycie pytania i odpowiedzi"}
 };
 const PROLOGUE = [
   "Każde Stado gdzieś zmierza.",
@@ -1385,7 +1385,7 @@ function renderConfig(room=null){
         <label class="form-label">Liczba rund: <b id="roundValue">${cfg.roundsPlanned}</b></label>
         <div class="range-row"><input id="rounds" type="range" min="3" max="30" value="${cfg.roundsPlanned}"><span>3–30</span></div>
         <h3 class="subhead" style="margin-top:22px">Jak grubo gramy?</h3>
-        <div class="mode-cards">${Object.entries(MODE).map(([key,m])=>`<button class="mode-card ${cfg.mode===key?"active":""}" data-action="mode" data-value="${key}"><b>${modeIcon(key)} ${esc(m.label)}</b><small>${esc(m.desc)}</small></button>`).join("")}</div>
+        <div class="mode-cards">${Object.entries(MODE).map(([key,m])=>`<button class="mode-card ${cfg.mode===key?"active":""}" data-action="mode" data-value="${key}"><span class="mode-kicker">${esc(m.short)}</span><b>${modeIcon(key)} ${esc(m.label)}</b><small>${esc(m.desc)}</small></button>`).join("")}</div>
         <h3 class="subhead" style="margin-top:22px">Liczba odpowiedzi</h3>
         <div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div>
         <p class="muted small">${suggested}. Jeżeli dołączy mniej graczy niż wybrano odpowiedzi, liczba odpowiedzi spada do liczby aktywnych Owiec.</p>
@@ -1440,10 +1440,11 @@ function renderPrologue(r){
 function renderHostGame(r){
   const c=currentAttempt(r),aps=activePlayers(r),phase=c?.phase||"";
   const mode=MODE[r.config.mode];
+  const hostAvatarPx=aps.length<=5?82:aps.length<=7?74:aps.length<=8?68:aps.length<=9?62:aps.length<=10?56:48;
   return `<main class="host-root">
     <header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span><span class="badge pink">${modeIcon(r.config.mode)} ${esc(mode.label)}</span>${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 Baran: ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
     <section class="host-grid">
-      <aside class="host-side host-left"><div class="host-panel"><h3>Owce: ${aps.length}/${MAX_PLAYERS}</h3></div><div class="host-panel"><div class="host-player-list" style="--players:${Math.max(aps.length,1)}">${aps.map(p=>renderHostPlayer(p,c)).join("")}</div></div></aside>
+      <aside class="host-side host-left"><div class="host-panel"><h3>Owce: ${aps.length}/${MAX_PLAYERS}</h3></div><div class="host-panel"><div class="host-player-list" style="--players:${Math.max(aps.length,1)};--host-avatar:${hostAvatarPx}px">${aps.map(p=>renderHostPlayer(p,c)).join("")}</div></div></aside>
       <main class="host-center">
         <div class="main-scene"><img src="assets/scenes/glowne.png" alt="STADO — główna scena"></div>
         ${renderHostQuestion(c,r)}
@@ -1490,7 +1491,8 @@ function renderTextOptions(c,r){
 }
 function renderWhichGrid(c,r){
   const n=c.options.length,cols=n<=4?n:Math.ceil(n/2),result=c.settlement;
-  return `<div class="which-grid" style="--cols:${cols}">${c.options.map(o=>{const pl=playerById(o.candidatePlayerId,r),win=result?.topOptionIds?.includes(o.optionId),count=result?.counts?.[o.optionId]||0;return `<div class="sheep-option ${win?"winner":""}">${sheepImg(pl)}<div class="name">${esc(pl?.name||"Owca")}</div><div class="type">${esc(sheepType(pl))}</div>${result?`<b>${count} ${count===1?"głos":"głosów"}</b>`:""}</div>`;}).join("")}</div>`;
+  const whichAvatarPx=n<=5?122:n<=6?112:n<=8?98:n<=10?84:72;
+  return `<div class="which-grid" style="--cols:${cols};--which-avatar:${whichAvatarPx}px">${c.options.map(o=>{const pl=playerById(o.candidatePlayerId,r),win=result?.topOptionIds?.includes(o.optionId),count=result?.counts?.[o.optionId]||0;return `<div class="sheep-option ${win?"winner":""}">${sheepImg(pl)}<div class="name">${esc(pl?.name||"Owca")}</div><div class="type">${esc(sheepType(pl))}</div>${result?`<b>${count} ${count===1?"głos":"głosów"}</b>`:""}</div>`;}).join("")}</div>`;
 }
 function renderHostBottomActions(c,r){
   if(!c)return "";
