@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.3";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -19,8 +19,26 @@ const MODE = {
   warmup: {label:"Rozgrzewka", short:"Na trzeźwo", music:2, desc:"Gotowe pytania i odpowiedzi"},
   freestyle: {label:"Freestyle", short:"Po dwóch drinkach", music:3, desc:"Pytania z gry, odpowiedzi od Was"},
   hardcore: {label:"Hardcore", short:"Hardcore", music:4, desc:"Sami tworzycie pytania i odpowiedzi"},
-  quiz: {label:"Quiz", short:"Quiz", music:2, desc:"5 odpowiedzi, jedna poprawna — liczy się wiedza i ryzyko"}
+  quiz: {label:"Quiz", short:"Quiz", music:2, desc:"Wiedza • 3 poziomy • 10 kategorii"}
 };
+const QUIZ_DIFFICULTIES = [
+  {key:"easy",label:"Łatwe",icon:"🙂"},
+  {key:"medium",label:"Średnie",icon:"🧠"},
+  {key:"hard",label:"Trudne",icon:"🔥"}
+];
+const QUIZ_CATEGORIES = [
+  {key:"world",label:"Świat i geografia",icon:"🌍",aliases:["Świat i geografia","Geografia"]},
+  {key:"science",label:"Nauka i natura",icon:"🔬",aliases:["Nauka i natura","Nauka"]},
+  {key:"space",label:"Kosmos",icon:"🚀",aliases:["Kosmos"]},
+  {key:"tech_ai",label:"Technologia i AI",icon:"💻",aliases:["Technologia i AI","Technologia","AI"]},
+  {key:"history",label:"Historia i cywilizacje",icon:"🏛️",aliases:["Historia i cywilizacje","Historia"]},
+  {key:"film_pop",label:"Film, seriale i popkultura",icon:"🎬",aliases:["Film, seriale i popkultura","Filmy","Film i seriale","Popkultura"]},
+  {key:"art_culture",label:"Muzyka, sztuka i kultura",icon:"🎨",aliases:["Muzyka, sztuka i kultura","Sztuka i kultura","Muzyka","Kultura"]},
+  {key:"sport",label:"Sport",icon:"⚽",aliases:["Sport"]},
+  {key:"bible_myth",label:"Biblia, religie i mitologie",icon:"📖",aliases:["Biblia, religie i mitologie","Biblia","Religie","Mitologie"]},
+  {key:"adult",label:"18+ / tabu i mocniejsze fakty",icon:"🔥",aliases:["18+ / tabu i mocniejsze fakty","18+","Tabu","Mocniejsze fakty","Inne"]}
+];
+const ALL_QUIZ_CATEGORY_KEYS = QUIZ_CATEGORIES.map(x=>x.key);
 const PROLOGUE = [
   "Każde Stado gdzieś zmierza.",
   "Niektóre Owce wiedzą dokąd, inne po prostu jadą z resztą.",
@@ -73,7 +91,8 @@ const sheepMap = new Map(sheepData.map(s => [String(s.id), s]));
 const runtime = {
   role: "start",
   modal: null,
-  configDraft: {mode:"freestyle", roundsPlanned:15, answerCountRequested:4, wolfEnabled:false, responseTimeSec:60},
+  configDraft: {mode:"freestyle", roundsPlanned:15, answerCountRequested:4, wolfEnabled:false, responseTimeSec:60,
+    quizDifficulty:"medium", quizCategories:[...ALL_QUIZ_CATEGORY_KEYS]},
   host: {
     peer:null, conns:new Map(), playerConns:new Map(), room:null, pendingRecoveries:new Map(),
     prologueTimer:null, phaseTimer:null, lockTimer:null, wakeLock:null, storageOK:true, creating:false
@@ -134,7 +153,7 @@ function bindGlobalEvents(){
   document.addEventListener("click", handleClick);
   document.addEventListener("input", handleInput);
   document.addEventListener("change", handleChange);
-  window.addEventListener("resize",()=>requestAnimationFrame(()=>{fitHostAnswerText();fitWhichSheepCards();updateCountdownNodes();}));
+  window.addEventListener("resize",()=>requestAnimationFrame(()=>{fitHostAnswerText();fitWhichSheepCards();fitHostInfoText();updateCountdownNodes();}));
   document.addEventListener("visibilitychange",()=>{if(!document.hidden)kickPlayerReconnect();});
   window.addEventListener("pageshow",()=>kickPlayerReconnect());
   window.addEventListener("online",()=>kickPlayerReconnect());
@@ -221,9 +240,41 @@ function handleClick(e){
     return;
   }
 
-  if(a === "mode"){ runtime.configDraft.mode = value; render(); return; }
+  if(a === "mode"){
+    runtime.configDraft.mode = value;
+    ensureQuizConfig(runtime.configDraft);
+    if(value === "quiz") runtime.configDraft.wolfEnabled = false;
+    render(); return;
+  }
   if(a === "answer-count"){ runtime.configDraft.answerCountRequested = +value; render(); return; }
+  if(a === "quiz-difficulty"){
+    runtime.configDraft.quizDifficulty = normalizeQuizDifficulty(value);
+    render(); return;
+  }
+  if(a === "quiz-category"){
+    ensureQuizConfig(runtime.configDraft);
+    const key=String(value||"");
+    if(!ALL_QUIZ_CATEGORY_KEYS.includes(key))return;
+    const selected=new Set(runtime.configDraft.quizCategories);
+    // Gdy aktywny jest pełny miks 10 kategorii, pierwsze kliknięcie wybiera
+    // tylko tę jedną kategorię. Potem można dowolnie dodawać/odejmować kolejne.
+    if(selected.size===ALL_QUIZ_CATEGORY_KEYS.length){
+      runtime.configDraft.quizCategories=[key];
+      render(); return;
+    }
+    if(selected.has(key)){
+      if(selected.size===1){toast("W Quizie musi pozostać wybrana co najmniej jedna kategoria.","error");return;}
+      selected.delete(key);
+    }else selected.add(key);
+    runtime.configDraft.quizCategories=ALL_QUIZ_CATEGORY_KEYS.filter(k=>selected.has(k));
+    render(); return;
+  }
+  if(a === "quiz-category-all"){
+    runtime.configDraft.quizCategories=[...ALL_QUIZ_CATEGORY_KEYS];
+    render(); return;
+  }
   if(a === "wolf-toggle"){
+    if(runtime.configDraft.mode === "quiz")return;
     runtime.configDraft.wolfEnabled = !runtime.configDraft.wolfEnabled;
     if(runtime.host.room) runtime.host.room.config.wolfEnabled = runtime.configDraft.wolfEnabled;
     render(); return;
@@ -236,13 +287,14 @@ function handleClick(e){
   if(a === "back-config"){
     if(runtime.host.room){
       runtime.host.room.status = "CONFIG";
-      runtime.configDraft = {...runtime.host.room.config};
+      runtime.configDraft = ensureQuizConfig({...runtime.host.room.config});
       commitHost("Powrót do konfiguracji");
     }
     return;
   }
 
   if(a === "skip-prologue"){ hostFinishPrologue(); return; }
+  if(a === "next-prologue"){ hostAdvancePrologue(true); return; }
   if(a === "show-results"){ hostSettleRound(); return; }
   if(a === "next-round"){ hostNextRound(); return; }
   if(a === "show-final"){ hostFinalize(false); return; }
@@ -320,6 +372,11 @@ function handleInput(e){
 
 function handleChange(e){
   const t=e.target;
+  if(t.id === "responseTimeSelect"){
+    runtime.configDraft.responseTimeSec = clamp(+t.value,10,120);
+    const v=document.querySelector("#responseTimeValue");if(v)v.textContent=formatTimeSetting(runtime.configDraft.responseTimeSec);
+    return;
+  }
   if("tokenToggle" in t.dataset){
     runtime.player.drafts.useToken = !!t.checked;
     persistPlayer();
@@ -364,6 +421,33 @@ function normalizeQuestionData(raw){
   return empty;
 }
 
+function normalizeQuizDifficulty(value){
+  const v=normalizeText(value).replace(/[ąćęłńóśźż]/g,c=>({"ą":"a","ć":"c","ę":"e","ł":"l","ń":"n","ó":"o","ś":"s","ź":"z","ż":"z"}[c]||c));
+  if(["easy","latwe","latwy","proste"].includes(v))return "easy";
+  if(["hard","trudne","trudny"].includes(v))return "hard";
+  return "medium";
+}
+function quizDifficultyLabel(key){return QUIZ_DIFFICULTIES.find(x=>x.key===normalizeQuizDifficulty(key))?.label||"Średnie";}
+function quizCategoryKey(value){
+  const v=normalizeText(value);
+  if(!v)return "";
+  const direct=QUIZ_CATEGORIES.find(c=>c.key===String(value));if(direct)return direct.key;
+  const found=QUIZ_CATEGORIES.find(c=>c.aliases.some(a=>normalizeText(a)===v));
+  return found?.key||"";
+}
+function quizCategoryLabel(key){return QUIZ_CATEGORIES.find(x=>x.key===key)?.label||key;}
+function sanitizeQuizCategorySelection(value){
+  const arr=Array.isArray(value)?value:[];
+  const out=ALL_QUIZ_CATEGORY_KEYS.filter(k=>arr.includes(k));
+  return out.length?out:[...ALL_QUIZ_CATEGORY_KEYS];
+}
+function ensureQuizConfig(cfg){
+  if(!cfg)return cfg;
+  cfg.quizDifficulty=normalizeQuizDifficulty(cfg.quizDifficulty||"medium");
+  cfg.quizCategories=sanitizeQuizCategorySelection(cfg.quizCategories);
+  cfg.responseTimeSec=clamp(+(cfg.responseTimeSec??60),10,120);
+  return cfg;
+}
 function normalizeQuizData(raw){
   const source=Array.isArray(raw)?raw:(Array.isArray(raw?.questions)?raw.questions:[]);
   return source.map((q,i)=>{
@@ -371,7 +455,11 @@ function normalizeQuizData(raw){
     let correctIndex=Number.isInteger(q?.correctIndex)?q.correctIndex:-1;
     if(correctIndex<0 && Number.isInteger(q?.correct) && q.correct>=0 && q.correct<answers.length) correctIndex=q.correct;
     if(correctIndex<0 && typeof q?.correctAnswer==="string") correctIndex=answers.findIndex(a=>normalizeText(a)===normalizeText(q.correctAnswer));
-    return {id:String(q?.id??`quiz_${i+1}`),question:cleanText(q?.question||""),answers,correctIndex,category:cleanText(q?.category||""),difficulty:cleanText(q?.difficulty||"")};
+    const category=cleanText(q?.category||q?.categoryKey||"");
+    return {
+      id:String(q?.id??`quiz_${i+1}`),question:cleanText(q?.question||""),answers,correctIndex,
+      category,categoryKey:quizCategoryKey(q?.categoryKey||category),difficulty:normalizeQuizDifficulty(q?.difficulty||"medium")
+    };
   });
 }
 function validQuizRecords(){
@@ -380,14 +468,18 @@ function validQuizRecords(){
     if(!Array.isArray(q.answers)||q.answers.length!==5||q.correctIndex<0||q.correctIndex>4)return false;
     const cleaned=q.answers.map(cleanText);
     if(cleaned.some(a=>!a||graphemeCount(a)>QUESTION_LIMIT))return false;
-    return new Set(cleaned.map(normalizeText)).size===5;
+    if(new Set(cleaned.map(normalizeText)).size!==5)return false;
+    if(!["easy","medium","hard"].includes(q.difficulty)||!ALL_QUIZ_CATEGORY_KEYS.includes(q.categoryKey))return false;
+    return true;
   });
 }
 function quizQuestionKey(q){return `quiz|${normalizeText(q.question)}`;}
 function eligibleQuizQuestions(room,includeUsed=false){
-  const seen=new Set();
+  const seen=new Set(),cfg=ensureQuizConfig({...runtime.configDraft,...(room?.config||{})});
+  const selected=new Set(cfg.quizCategories),difficulty=cfg.quizDifficulty;
   return validQuizRecords().filter(q=>{
     const key=quizQuestionKey(q);if(seen.has(key))return false;seen.add(key);
+    if(q.difficulty!==difficulty||!selected.has(q.categoryKey))return false;
     if(!includeUsed&&room?.match?.usedQuestionKeys?.includes(key))return false;
     return true;
   });
@@ -457,11 +549,14 @@ function preflight(room){
   const errors=[], warnings=[];
   if(sheepData.filter(s=>s.selectable!==false).length < 12) warnings.push("Baza ma mniej niż 12 wybieralnych avatarów.");
   if(room.config.mode==="quiz"){
-    const rawCount=(runtime.quizData||[]).length,pool=eligibleQuizQuestions(room,true);
+    ensureQuizConfig(room.config);
+    const rawCount=(runtime.quizData||[]).length,valid=validQuizRecords(),pool=eligibleQuizQuestions(room,true);
     if(!rawCount) errors.push("Brak bazy Quiz: dodaj plik data/quiz.js z window.STADO_QUIZ.");
-    else if(pool.length!==rawCount) warnings.push(`Quiz: poprawnych rekordów ${pool.length}/${rawCount}. Nieprawidłowe rekordy zostaną pominięte.`);
-    if(pool.length < room.config.roundsPlanned) errors.push(`Quiz: dostępnych unikalnych pytań: ${pool.length}, zaplanowanych rund: ${room.config.roundsPlanned}.`);
-    if(pool.length < 3) errors.push("Quiz wymaga co najmniej 3 prawidłowych pytań.");
+    else if(valid.length!==rawCount) warnings.push(`Quiz: poprawnych rekordów ${valid.length}/${rawCount}. Rekordy bez prawidłowej kategorii, poziomu, 5 odpowiedzi lub klucza odpowiedzi zostaną pominięte.`);
+    const catCount=room.config.quizCategories?.length||0;
+    if(!catCount) errors.push("Quiz: wybierz co najmniej jedną kategorię pytań.");
+    if(pool.length < room.config.roundsPlanned) errors.push(`Quiz (${quizDifficultyLabel(room.config.quizDifficulty)}, ${catCount} kat.): dostępnych pytań ${pool.length}, zaplanowanych rund ${room.config.roundsPlanned}.`);
+    if(pool.length < 3) errors.push("Quiz wymaga co najmniej 3 pytań pasujących do wybranego poziomu i kategorii.");
   }else if(room.config.mode!=="hardcore"){
     const pool=eligibleQuestions(room.config.mode, room, true);
     if(pool.length < room.config.roundsPlanned) errors.push(`Dostępnych unikalnych pytań: ${pool.length}, zaplanowanych rund: ${room.config.roundsPlanned}.`);
@@ -543,6 +638,8 @@ function startNewMatchState(room){
 
 function activePlayers(room=runtime.host.room){ return room?.players?.filter(p=>p.active&&!p.removed) || []; }
 function classifiedPlayers(room=runtime.host.room){ return activePlayers(room); }
+function minPlayersForMode(mode){return mode==="quiz"?2:MIN_PLAYERS;}
+function minPlayersForRoom(room=runtime.host.room){return minPlayersForMode(room?.config?.mode||runtime.configDraft.mode);}
 function actualAnswerCount(room=runtime.host.room){ return Math.min(room.config.answerCountRequested, activePlayers(room).length); }
 function startingTokens(room=runtime.host.room){return ["warmup","quiz"].includes(room?.config?.mode)?2:1;}
 function playerById(id,room=runtime.host.room){ return room?.players?.find(p=>p.playerId===id); }
@@ -550,7 +647,8 @@ function sheepById(id){ return sheepMap.get(String(id)) || {id:"missing",name:"O
 function currentAttempt(room=runtime.host.room){ return room?.match?.current || null; }
 
 function createOrApplyRoom(){
-  const cfg={...runtime.configDraft, roundsPlanned:clamp(+runtime.configDraft.roundsPlanned,3,30), answerCountRequested:clamp(+runtime.configDraft.answerCountRequested,3,5), responseTimeSec:clamp(+(runtime.configDraft.responseTimeSec||60),10,120)};
+  const cfg=ensureQuizConfig({...runtime.configDraft, roundsPlanned:clamp(+runtime.configDraft.roundsPlanned,3,30), answerCountRequested:clamp(+runtime.configDraft.answerCountRequested,3,5), responseTimeSec:clamp(+(runtime.configDraft.responseTimeSec||60),10,120)});
+  if(cfg.mode==="quiz"){cfg.wolfEnabled=false;cfg.answerCountRequested=5;}
   runtime.configDraft=cfg;
   if(runtime.host.room){
     runtime.host.room.config={...cfg};
@@ -803,7 +901,7 @@ function hostRemovePlayer(id){
       runtime.host.playerConns.delete(pl.playerId);
       removeFromRamOrder(r,pl.playerId);
       if(r.match?.current && !r.match.current.settlement) hostAbortAttempt("Usunięto gracza.",true);
-      if(activePlayers(r).length<MIN_PLAYERS && r.match && !r.match.finalized) hostFinalize(true);
+      if(activePlayers(r).length<minPlayersForRoom(r) && r.match && !r.match.finalized) hostFinalize(true);
     }
     commitHost("Usunięto gracza");
   });
@@ -878,7 +976,8 @@ function hostStartMatch(){
   // happens later from a timer and may otherwise be denied by autoplay policy.
   primeMusicTrack(MODE[r.config.mode]?.music || 2);
   const aps=activePlayers(r);
-  if(aps.length<MIN_PLAYERS){toast("Potrzeba minimum 3 Owiec.","error");return;}
+  const minPlayers=minPlayersForRoom(r);
+  if(aps.length<minPlayers){toast(`Potrzeba minimum ${minPlayers} Owiec.`,"error");return;}
   const offline=aps.filter(x=>!x.isBot&&!x.connected);
   if(offline.length){toast(`Czekamy na połączenie: ${offline.map(x=>x.name).join(", ")}`,"error");return;}
   const pf=preflight(r);
@@ -890,11 +989,16 @@ function hostStartMatch(){
 
 function startPrologueTimer(){
   stopPrologueTimer();
-  runtime.host.prologueTimer=setInterval(()=>{
-    const r=runtime.host.room;if(!r||r.status!=="PROLOGUE"||r.paused)return;
-    if(r.match.prologueIndex < PROLOGUE.length-1){r.match.prologueIndex++;commitHost("Prolog");}
-    else hostFinishPrologue();
-  },4000);
+  runtime.host.prologueTimer=setInterval(()=>hostAdvancePrologue(false),4000);
+}
+function hostAdvancePrologue(manual=false){
+  const r=runtime.host.room;if(!r||r.status!=="PROLOGUE"||r.paused)return;
+  if(r.match.prologueIndex < PROLOGUE.length-1){
+    r.match.prologueIndex++;
+    commitHost("Prolog");
+    // Po ręcznym kliknięciu daj pełne 4 sekundy na przeczytanie następnego tekstu.
+    if(manual)startPrologueTimer();
+  }else hostFinishPrologue();
 }
 function stopPrologueTimer(){if(runtime.host.prologueTimer){clearInterval(runtime.host.prologueTimer);runtime.host.prologueTimer=null;}}
 function hostFinishPrologue(){
@@ -904,7 +1008,7 @@ function hostFinishPrologue(){
 
 function prepareRound(){
   const r=runtime.host.room,m=r.match;if(!r||!m||m.finalized)return;
-  if(activePlayers(r).length<MIN_PLAYERS){hostFinalize(true);return;}
+  if(activePlayers(r).length<minPlayersForRoom(r)){hostFinalize(true);return;}
   if(m.settledRounds>=m.plannedRounds)return;
   m.roundNumber=m.settledRounds+1;
   const cur={
@@ -982,7 +1086,7 @@ function makeTextOptions(texts,authorIds){
     .map((o,i)=>({...o,order:i,letter:COLORS[i]?.letter||String(i+1),colorKey:COLORS[i]?.key||"a"}));
 }
 function assignWolf(r,cur){
-  if(!r.config.wolfEnabled){cur.wolfPlayerId=null;return;}
+  if(r.config.mode==="quiz"||!r.config.wolfEnabled){cur.wolfPlayerId=null;return;}
   const aps=activePlayers(r);if(!aps.length)return;
   const min=Math.min(...aps.map(pl=>r.match.wolfAssignCounts[pl.playerId]||0));
   let low=aps.filter(pl=>(r.match.wolfAssignCounts[pl.playerId]||0)===min);
@@ -1219,8 +1323,7 @@ function hostAbortAttempt(reason="Pominięto pytanie.",fromRemoval=false){
   if(c){c.aborted=true;c.abortReason=reason;c.phase="ABORTED";c.tokenReservations={};}
   m.current=null;
   commitHost(reason);
-  if(!fromRemoval && activePlayers(r).length>=MIN_PLAYERS)setTimeout(()=>prepareRound(),80);
-  else if(fromRemoval && activePlayers(r).length>=MIN_PLAYERS)setTimeout(()=>prepareRound(),80);
+  if(activePlayers(r).length>=minPlayersForRoom(r))setTimeout(()=>prepareRound(),80);
 }
 
 function hostFinalize(early=false){
@@ -1262,7 +1365,7 @@ function buildFinalResult(r){
 function hostReplay(){
   const r=runtime.host.room;if(!r||r.status!=="FINAL")return;
   clearPhaseTimer();
-  const aps=activePlayers(r);if(aps.length<MIN_PLAYERS){toast("Do rewanżu potrzeba minimum 3 Owiec.","error");return;}
+  const aps=activePlayers(r),minPlayers=minPlayersForRoom(r);if(aps.length<minPlayers){toast(`Do rewanżu potrzeba minimum ${minPlayers} Owiec.`,"error");return;}
   aps.forEach(p=>{p.points=0;p.tokens=startingTokens(r);p.stats=makeStats();p.replayReady=false;});
   r.match=startNewMatchState(r);r.status="PROLOGUE";r.paused=false;r.actionLog={};
   playMusic(1);commitHost("Rewanż");startPrologueTimer();
@@ -1273,7 +1376,7 @@ function hostNewGame(){
   clearPhaseTimer();
   stopPrologueTimer();
   activePlayers(r).forEach(p=>{p.points=0;p.tokens=startingTokens(r);p.stats=makeStats();p.replayReady=false;});
-  r.match=null;r.status="CONFIG";r.paused=false;r.actionLog={};runtime.configDraft={...r.config};
+  r.match=null;r.status="CONFIG";r.paused=false;r.actionLog={};runtime.configDraft=ensureQuizConfig({...r.config});
   playMusic(1);commitHost("Nowa gra — konfiguracja");
 }
 
@@ -1402,7 +1505,8 @@ function persistHost(){
 function restoreHostSnapshot(){
   const saved=readJSON(HOST_STORAGE_KEY);if(!saved?.room||saved.room.closed)return false;
   const r=saved.room;if(r.protocolVersion!==PROTOCOL_VERSION)return false;
-  runtime.role="host";runtime.host.room=r;runtime.configDraft={responseTimeSec:60,...r.config};
+  ensureQuizConfig(r.config);if(r.config.mode==="quiz")r.config.wolfEnabled=false;
+  runtime.role="host";runtime.host.room=r;runtime.configDraft=ensureQuizConfig({responseTimeSec:60,quizDifficulty:"medium",quizCategories:[...ALL_QUIZ_CATEGORY_KEYS],...r.config});
   const restoredCurrent=r.match?.current;
   if(restoredCurrent&&isTimedPhase(restoredCurrent.phase)&&restoredCurrent.phaseDeadlineAt){
     restoredCurrent.phaseRemainingMs=Math.max(1000,restoredCurrent.phaseDeadlineAt-(saved.savedAt||Date.now()));
@@ -1815,12 +1919,12 @@ function renderConfig(room=null){
         <label class="form-label">Liczba rund: <b id="roundValue">${cfg.roundsPlanned}</b></label>
         <div class="range-row"><input id="rounds" type="range" min="3" max="30" value="${cfg.roundsPlanned}"><span>3–30</span></div>
         <label class="form-label" style="margin-top:18px">⏱ Limit czasu na ruch: <b id="responseTimeValue">${formatTimeSetting(cfg.responseTimeSec??60)}</b></label>
-        <div class="range-row"><input id="responseTime" type="range" min="10" max="120" step="10" value="${clamp(+(cfg.responseTimeSec??60),10,120)}"><span>10 s – 2 min</span></div>
-        <p class="muted small">Dotyczy wpisywania odpowiedzi/pytania i głosowania. Brak głosu w czasie = 0 pkt w tej rundzie. Polowanie Wilka na osobę bez głosu jest neutralne.</p>
+        <select id="responseTimeSelect" class="select timer-select">${Array.from({length:12},(_,i)=>(i+1)*10).map(sec=>`<option value="${sec}" ${clamp(+(cfg.responseTimeSec??60),10,120)===sec?"selected":""}>${sec<60?`${sec} sekund`:sec===60?"1 minuta":sec===120?"2 minuty":`1 min ${sec-60} s`}</option>`).join("")}</select>
+        <p class="muted small">Zakres 10–120 s. Każda faza dostaje własny pełny limit. Brak głosu w czasie = 0 pkt w tej rundzie.</p>
         <h3 class="subhead" style="margin-top:22px">Jak grubo gramy?</h3>
         <div class="mode-cards">${Object.entries(MODE).map(([key,m])=>`<button class="mode-card ${cfg.mode===key?"active":""}" data-action="mode" data-value="${key}"><span class="mode-kicker">${esc(m.short)}</span><b>${modeIcon(key)} ${esc(m.label)}</b><small>${esc(m.desc)}</small></button>`).join("")}</div>
-        ${cfg.mode==="quiz"?`<div class="info-item" style="margin-top:22px"><b>🧠 Quiz zawsze ma 5 odpowiedzi</b><br><small class="muted">Dokładnie jedna odpowiedź jest poprawna.</small></div>`:`<h3 class="subhead" style="margin-top:22px">Liczba odpowiedzi</h3><div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div><p class="muted small">${suggested}. Jeżeli dołączy mniej graczy niż wybrano odpowiedzi, liczba odpowiedzi spada do liczby aktywnych Owiec.</p>`}
-        <div class="info-item"><label class="spread"><span><b>🐺 Tryb Wilka</b><br><small class="muted">Tajna minigra po oddaniu głosu</small></span><span class="switch"><input type="checkbox" ${cfg.wolfEnabled?"checked":""} data-action="wolf-toggle"><span></span></span></label></div>
+        ${cfg.mode==="quiz"?renderQuizConfigControls(cfg):`<h3 class="subhead" style="margin-top:22px">Liczba odpowiedzi</h3><div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div><p class="muted small">${suggested}. Jeżeli dołączy mniej graczy niż wybrano odpowiedzi, liczba odpowiedzi spada do liczby aktywnych Owiec.</p>`}
+        ${cfg.mode!=="quiz"?`<div class="info-item"><label class="spread"><span><b>🐺 Tryb Wilka</b><br><small class="muted">Tajna minigra po oddaniu głosu</small></span><span class="switch"><input type="checkbox" ${cfg.wolfEnabled?"checked":""} data-action="wolf-toggle"><span></span></span></label></div>`:""}
         <div class="row wrap" style="margin-top:20px"><button class="btn" data-action="create-room">${room?"ZAPISZ I WRÓĆ DO LOBBY":"UTWÓRZ POKÓJ"}</button>${!room?`<button class="btn light" data-action="back-start">Wróć</button>`:""}</div><div style="margin-top:14px">${versionHTML()}</div>
       </article>
       <article class="card pad">
@@ -1829,7 +1933,7 @@ function renderConfig(room=null){
         <h3 class="subhead">Jak działa punktacja?</h3>
         <div class="info-list">
           ${cfg.mode==="quiz"?`<div class="info-item">🧠 <b>+2</b> — poprawna odpowiedź.</div><div class="info-item">❌ <b>0</b> — błędna odpowiedź lub brak głosu w czasie.</div><div class="info-item">🧶 <b>×2</b> — Żeton Wełny daje +4 za poprawną odpowiedź; przy błędzie żeton przepada. Każdy zaczyna z 2 żetonami.</div>`:`<div class="info-item">🐑 <b>+2</b> — jedno największe Stado.</div><div class="info-item">🤝 <b>+1</b> — remis kilku największych Stad.</div><div class="info-item">🖤 <b>+3</b> — dokładnie jedna samotna Czarna Owca w całej rundzie.</div><div class="info-item">🧶 <b>×2</b> — Żeton Wełny podwaja punkty za własny głos. Niewykorzystany żeton daje +1 pkt w finale.</div>${cfg.mode!=="warmup"?`<div class="info-item">✍️ Autor odpowiedzi z największą liczbą głosów zdobywa <b>+1 Żeton Wełny</b>.</div>`:`<div class="info-item">🧶 Rozgrzewka: każdy zaczyna z <b>2 Żetonami Wełny</b>.</div>`}`}
-          ${cfg.wolfEnabled?`<div class="info-item">🐺 Wilk: trafienie <b>+1 / ofiara −2</b>, pudło <b>−1</b>, rezygnacja 0.</div>`:""}
+          ${cfg.mode!=="quiz"&&cfg.wolfEnabled?`<div class="info-item">🐺 Wilk: trafienie <b>+1 / ofiara −2</b>, pudło <b>−1</b>, rezygnacja 0.</div>`:""}
         </div>
         ${pf.errors.length||pf.warnings.length?`<div class="data-diagnostics">${pf.errors.map(x=>`<div class="error-text">● ${esc(x)}</div>`).join("")}${pf.warnings.map(x=>`<div class="muted">● ${esc(x)}</div>`).join("")}</div>`:""}
       </article>
@@ -1837,15 +1941,27 @@ function renderConfig(room=null){
     <div class="sheep-runway">${[0,1,2].map((_,i)=>`<i class="css-sheep" style="animation-delay:${-i*2.6}s"></i>`).join("")}<i class="css-sheep black" style="animation-delay:-5s"></i></div>
   </main>`;
 }
+function renderQuizConfigControls(cfg){
+  ensureQuizConfig(cfg);
+  const allSelected=cfg.quizCategories.length===ALL_QUIZ_CATEGORY_KEYS.length;
+  return `<div class="quiz-config-block">
+    <div class="info-item"><b>🧠 Quiz: 5 odpowiedzi, dokładnie 1 poprawna</b><br><small class="muted">Minimum 2 graczy. Brak Czarnej Owcy, Barana, tworzenia odpowiedzi i Wilka.</small></div>
+    <h3 class="subhead">Poziom pytań</h3>
+    <div class="choice-row quiz-difficulty-row">${QUIZ_DIFFICULTIES.map(d=>`<button class="choice quiz-difficulty ${cfg.quizDifficulty===d.key?"active":""}" data-action="quiz-difficulty" data-value="${d.key}">${d.icon} ${d.label}</button>`).join("")}</div>
+    <div class="spread quiz-category-heading"><h3 class="subhead">Kategorie pytań</h3><button class="btn light quiz-all-btn ${allSelected?"active":""}" data-action="quiz-category-all">Wszystkie 10</button></div>
+    <div class="quiz-category-grid">${QUIZ_CATEGORIES.map(cat=>`<button class="quiz-category ${cfg.quizCategories.includes(cat.key)?"active":""}" data-action="quiz-category" data-value="${cat.key}"><span>${cat.icon}</span><b>${esc(cat.label)}</b></button>`).join("")}</div>
+    <p class="muted small">Możesz łączyć kilka kategorii. Wybrano <b>${cfg.quizCategories.length}/10</b>.</p>
+  </div>`;
+}
 function modeDescription(mode){
   if(mode==="warmup")return `<p><b>Gotowe pytania i gotowe odpowiedzi.</b> W rundach „Która Owca?” wybieracie spośród wszystkich graczy. Najprostsza wersja na start.</p>`;
   if(mode==="freestyle")return `<p><b>Pytania losuje gra, odpowiedzi tworzycie Wy.</b> Wyjątkiem są rundy „Która Owca?”, gdzie odpowiedziami są uczestnicy. Autorzy zwycięskich odpowiedzi zdobywają Żetony Wełny.</p>`;
-  if(mode==="quiz")return `<p><b>Klasyczny quiz w stylu STADO.</b> Każde pytanie ma 5 odpowiedzi i dokładnie jedną poprawną. Poprawna odpowiedź daje +2 pkt. Nie ma Czarnej Owcy, Barana ani pisania odpowiedzi. Każdy zaczyna z 2 Żetonami Wełny. Wilk działa tylko wtedy, gdy włączysz go w ustawieniach.</p>`;
+  if(mode==="quiz")return `<p><b>Quiz wiedzy w stylu STADO.</b> Wybierasz poziom: Łatwe, Średnie albo Trudne oraz jedną lub kilka z 10 kategorii. Każde pytanie ma 5 odpowiedzi i dokładnie jedną poprawną. Poprawna odpowiedź daje +2 pkt. Nie ma Czarnej Owcy, Barana, pisania odpowiedzi ani Wilka. Każdy zaczyna z 2 Żetonami Wełny.</p>`;
   return `<p><b>Sandbox chaos.</b> Każdą rundę prowadzi Baran: wybiera „Która Owca?” albo pytanie otwarte i sam pisze pytanie. Przy pytaniu otwartym odpowiedzi tworzą wybrane Owce; Baran dołącza do autorów tylko wtedy, gdy liczba odpowiedzi równa się liczbie aktywnych graczy.</p>`;
 }
 
 function renderLobby(r){
-  const aps=activePlayers(r),canStart=aps.length>=MIN_PLAYERS&&!aps.some(p=>!p.isBot&&!p.connected),url=joinURL(r);
+  const aps=activePlayers(r),minPlayers=minPlayersForRoom(r),canStart=aps.length>=minPlayers&&!aps.some(p=>!p.isBot&&!p.connected),url=joinURL(r);
   return `<main class="app-shell lobby-shell">
     <div class="topbar">${logoHTML()}<button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div>
     <section class="card lobby-card">
@@ -1853,7 +1969,7 @@ function renderLobby(r){
       <div class="room-join"><div class="center"><div class="room-code">${esc(r.roomCode)}</div><div class="muted">Kod pokoju</div><div class="small muted">${esc(joinDisplayURL(r))}</div></div><div id="qrBox" data-qr="${escAttr(url)}"></div><div><b>Jak dołączyć?</b><ol><li>Zeskanuj QR albo otwórz stronę.</li><li>Wpisz kod <b>${esc(r.roomCode)}</b>.</li><li>Wybierz imię i wolną Owcę.</li></ol></div></div>
       <div class="player-lobby-grid">${aps.map(p=>renderLobbyPlayer(p)).join("")}${Array.from({length:Math.max(0,Math.min(12,6)-aps.length)},()=>`<div class="lobby-player" style="opacity:.28"><div>＋</div><div><div class="name">Czeka na Owcę…</div><div class="type">Dołącz telefonem</div></div></div>`).join("")}</div>
       <div class="lobby-actions"><button class="btn" data-action="start-match" ${canStart?"":"disabled"}>START (${aps.length} ${aps.length===1?"owca":"owiec"})</button><button class="btn secondary" data-action="add-bot">+ Dodaj Owcę testową</button><button class="btn secondary" data-action="back-config">← Ustawienia gry</button></div>
-      <p class="muted small lobby-note">Minimum 3, maksimum 12. Gra nie wystartuje, jeśli któryś prawdziwy gracz jest rozłączony. BOT-y służą wyłącznie do testowania rozgrywki. <span class="lobby-version">${versionHTML()}</span></p>
+      <p class="muted small lobby-note"><span>Minimum ${minPlayers}, maksimum 12. ${r.config.mode==="quiz"?`Quiz: ${quizDifficultyLabel(r.config.quizDifficulty)} • ${r.config.quizCategories?.length||10} kat. • ${formatTimeSetting(r.config.responseTimeSec)}`:""} Gra nie wystartuje, jeśli któryś prawdziwy gracz jest rozłączony. BOT-y służą wyłącznie do testowania rozgrywki.</span> <span class="lobby-version">${versionHTML()}</span></p>
     </section>
     <div class="sheep-runway">${[0,1,2].map((_,i)=>`<i class="css-sheep" style="animation-delay:${-i*2.7}s"></i>`).join("")}<i class="css-sheep black" style="animation-delay:-3s"></i></div>
   </main>`;
@@ -1862,7 +1978,7 @@ function renderLobbyPlayer(p){return `<div class="lobby-player ${p.isBot?"bot":"
 
 function renderPrologue(r){
   const i=r.match?.prologueIndex||0;
-  return `<main class="prologue"><div class="topbar">${logoHTML()}<div class="row"><button class="btn secondary" data-action="skip-prologue">Pomiń prolog</button><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></div><div class="prologue-main"><div class="prologue-box"><div class="prologue-scene"><img src="assets/scenes/prolog.png" alt="Stado rusza"></div><div class="prologue-text">${esc(PROLOGUE[i])}</div><div class="prologue-dots">${PROLOGUE.map((_,j)=>`<i class="${j===i?"active":""}"></i>`).join("")}</div></div></div><div class="center muted">${modeIcon(r.config.mode)} ${esc(MODE[r.config.mode].label)}</div>${r.paused?pauseOverlay():""}</main>`;
+  return `<main class="prologue prologue-clickable" data-action="next-prologue"><div class="topbar">${logoHTML()}<div class="row"><button class="btn secondary" data-action="skip-prologue">Pomiń prolog</button><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></div><div class="prologue-main"><div class="prologue-box"><div class="prologue-scene"><img src="assets/scenes/prolog.png" alt="Stado rusza"></div><div class="prologue-text">${esc(PROLOGUE[i])}</div><div class="prologue-dots">${PROLOGUE.map((_,j)=>`<i class="${j===i?"active":""}"></i>`).join("")}</div><div class="prologue-click-hint">Kliknij ekran, aby przejść dalej</div></div></div><div class="center muted">${modeIcon(r.config.mode)} ${esc(MODE[r.config.mode].label)}</div>${r.paused?pauseOverlay():""}</main>`;
 }
 
 function renderHostGame(r){
@@ -1871,11 +1987,26 @@ function renderHostGame(r){
   // The left column is a live scoreboard: highest score stays at the top.
   // Sorting a copy keeps gameplay/player order untouched. Ties keep join order.
   const scoreboard=aps.slice().sort((a,b)=>(b.points||0)-(a.points||0)||(a.joinedAt||0)-(b.joinedAt||0));
-  const hostAvatarPx=aps.length<=5?82:aps.length<=7?74:aps.length<=8?68:aps.length<=9?62:aps.length<=10?56:48;
+  const playerMetrics=aps.length<=4
+    ? {avatar:108,name:21,type:14,score:21,icon:24}
+    : aps.length<=5
+      ? {avatar:98,name:19,type:13,score:19,icon:22}
+      : aps.length<=6
+        ? {avatar:88,name:18,type:12,score:18,icon:21}
+        : aps.length<=7
+          ? {avatar:78,name:17,type:11.5,score:17,icon:20}
+          : aps.length<=8
+            ? {avatar:70,name:16,type:11,score:16,icon:19}
+            : aps.length<=9
+              ? {avatar:62,name:15,type:10.5,score:15,icon:18}
+              : aps.length<=10
+                ? {avatar:55,name:14,type:10,score:14,icon:17}
+                : {avatar:47,name:13,type:9,score:13,icon:16};
+  const playerVars=`--players:${Math.max(aps.length,1)};--host-avatar:${playerMetrics.avatar}px;--host-name:${playerMetrics.name}px;--host-type:${playerMetrics.type}px;--host-score:${playerMetrics.score}px;--host-icon:${playerMetrics.icon}px`;
   return `<main class="host-root">
     <header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span>${countdownHTML(c)}<span class="badge pink">${modeIcon(r.config.mode)} ${esc(mode.label)}</span>${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 Baran: ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
     <section class="host-grid">
-      <aside class="host-side host-left"><div class="host-panel"><h3>Owce: ${aps.length}/${MAX_PLAYERS} <span class="small muted">• ranking</span></h3></div><div class="host-panel"><div class="host-player-list" style="--players:${Math.max(aps.length,1)};--host-avatar:${hostAvatarPx}px">${scoreboard.map(p=>renderHostPlayer(p,c)).join("")}</div></div></aside>
+      <aside class="host-side host-left"><div class="host-panel"><h3>Owce: ${aps.length}/${MAX_PLAYERS} <span class="small muted">• ranking</span></h3></div><div class="host-panel"><div class="host-player-list" style="${playerVars}">${scoreboard.map(p=>renderHostPlayer(p,c)).join("")}</div></div></aside>
       <main class="host-center ${phase==="RESULT"?"has-result":""}">
         <div class="main-scene"><img src="assets/scenes/glowne.png" alt="STADO — główna scena"></div>
         ${renderHostQuestion(c,r)}
@@ -1883,9 +2014,9 @@ function renderHostGame(r){
         <div class="host-bottom-actions">${renderHostBottomActions(c,r)}</div>
       </main>
       <aside class="host-side host-right">
-        <div class="host-panel"><h3>💬 Co się dzieje?</h3>${renderHostStatus(c,r)}</div>
-        <div class="host-panel"><h3>🏆 Historia rundy</h3>${renderHistory(r)}</div>
-        <div class="host-panel"><h3>📖 Punktacja i zasady</h3>${renderScoreRules(r)}</div>
+        <div class="host-panel host-info-panel"><h3>💬 Teraz</h3>${renderHostStatus(c,r)}</div>
+        <div class="host-panel host-history-panel"><h3>🏆 Ostatnia runda</h3>${renderHistory(r)}</div>
+        <div class="host-panel host-score-panel"><h3>📖 Punkty</h3>${renderScoreRules(r)}</div>
       </aside>
     </section>
     ${r.paused?pauseOverlay():""}<div class="rotate-overlay"><div class="overlay-box"><h1>Obróć urządzenie ↻</h1><p>Ekran główny STADO działa w orientacji poziomej.</p></div></div>
@@ -1893,7 +2024,7 @@ function renderHostGame(r){
 }
 function renderHostPlayer(p,c){
   const special=[];if(c?.ramPlayerId===p.playerId)special.push("🐏");if(c?.settlement?.wolfResult?.wolfPlayerId===p.playerId)special.push("🐺");
-  return `<div class="host-player ${p.connected||p.isBot?"":"offline"}">${sheepImg(p)}<div><div class="pn">${esc(p.name)} ${special.join(" ")}</div><div class="pt">${esc(sheepType(p))}</div></div><div class="res">🏆 ${p.points}<br>🧶 ${p.tokens}</div></div>`;
+  return `<div class="host-player ${p.connected||p.isBot?"":"offline"}">${sheepImg(p)}<div class="host-player-copy"><div class="pn">${esc(p.name)} ${special.join(" ")}</div><div class="pt">${esc(sheepType(p))}</div></div><div class="res"><div class="resource score-resource"><span class="resource-icon">🏆</span><b>${p.points}</b></div><div class="resource token-resource"><span class="resource-icon">🧶</span><b>${p.tokens}</b></div></div></div>`;
 }
 function renderHostQuestion(c,r){
   if(!c)return `<div class="question-card">Przygotowujemy następną rundę…</div>`;
@@ -1942,49 +2073,61 @@ function renderHostBottomActions(c,r){
   return "";
 }
 function renderHostStatus(c,r){
-  if(!c)return `<div class="status-line">Przygotowanie rundy…</div>`;
+  if(!c)return `<div class="status-lines"><div class="status-line status-primary">Przygotowanie rundy…</div></div>`;
   const lines=[];
-  if(c.phase==="QUESTION_INPUT")lines.push(`🐏 ${playerById(c.ramPlayerId)?.name||"Baran"} przygotowuje pytanie.`);
-  else if(c.phase==="ANSWER_INPUT"){
-    lines.push(`✍️ Czekamy na odpowiedzi: ${Object.keys(c.answers||{}).length}/${c.assignedAuthorIds.length}.`);
-    c.assignedAuthorIds.forEach(pid=>lines.push(`${c.answers[pid]?"✅":"…"} ${playerById(pid)?.name||"Owca"}`));
+  if(c.phase==="QUESTION_INPUT"){
+    lines.push(`🐏 <b>${esc(playerById(c.ramPlayerId)?.name||"Baran")}</b> przygotowuje pytanie.`);
+  }else if(c.phase==="ANSWER_INPUT"){
+    const done=Object.keys(c.answers||{}).length,total=c.assignedAuthorIds.length;
+    lines.push(`✍️ Czekamy na odpowiedzi: <b>${done}/${total}</b>.`);
+    c.assignedAuthorIds.forEach(pid=>lines.push(`${c.answers[pid]?"✅":"…"} ${esc(playerById(pid)?.name||"Owca")}`));
   }else if(c.phase==="VOTING"||c.phase==="READY_TO_REVEAL"){
     const done=Object.keys(c.votes||{}).length,total=activePlayers(r).length;
-    lines.push(`🗳 Gotowych: ${done}/${total} Owiec.`);
-    if((c.timedOutPlayerIds||[]).length)lines.push(`⏱ Bez głosu w czasie: ${(c.timedOutPlayerIds||[]).length}.`);
-    if(r.config.wolfEnabled)lines.push(`🐺 Tajna rola Wilka jest rozliczana bez ujawniania tożsamości.`);
-    if(c.phase==="READY_TO_REVEAL")lines.push(`✅ Wszystkie decyzje zapisane. Można pokazać wyniki.`);
+    lines.push(`🗳 Gotowych: <b>${done}/${total}</b> Owiec.`);
+    if((c.timedOutPlayerIds||[]).length)lines.push(`⏱ Bez głosu w czasie: <b>${(c.timedOutPlayerIds||[]).length}</b>.`);
+    if(r.config.mode!=="quiz"&&r.config.wolfEnabled)lines.push(`🐺 Tajna rola Wilka jest rozliczana bez ujawniania tożsamości.`);
+    if(c.phase==="READY_TO_REVEAL")lines.push(`✅ Wszystkie decyzje zapisane. Pokazujemy wyniki.`);
   }else if(c.phase==="RESULT"){
-    const s=c.settlement;
+    const st=c.settlement;
     if(c.type==="quiz"){
-      const correct=c.options.find(o=>o.optionId===s.correctOptionId),correctVotes=(s.voterMap?.[s.correctOptionId]||[]).length;
-      lines.push(`🧠 Poprawna odpowiedź: ${optionLabel(c,correct,true)}.`);
-      lines.push(`✅ Poprawnie odpowiedziało: ${correctVotes}/${activePlayers(r).length}.`);
+      const correct=c.options.find(o=>o.optionId===st.correctOptionId),correctVotes=(st.voterMap?.[st.correctOptionId]||[]).length;
+      lines.push(`🧠 Poprawna odpowiedź: <b>${esc(optionLabel(c,correct,true))}</b>.`);
+      lines.push(`✅ Poprawnie odpowiedziało: <b>${correctVotes}/${activePlayers(r).length}</b>.`);
     }else{
-      lines.push(s.tiedTop?`🤝 Remis największych Stad — po +1.`:`🐑 Największe Stado zdobywa +2.`);
-      if(s.blackOptionId){const pid=(s.voterMap[s.blackOptionId]||[])[0];lines.push(`🖤 Czarna Owca: ${playerById(pid)?.name||"Owca"} (+3).`);}else lines.push(`🖤 Brak unikalnej Czarnej Owcy.`);
+      lines.push(st.tiedTop?`🤝 Remis największych Stad — po <b>+1</b>.`:`🐑 Największe Stado zdobywa <b>+2</b>.`);
+      if(st.blackOptionId){const pid=(st.voterMap[st.blackOptionId]||[])[0];lines.push(`🖤 Czarna Owca: <b>${esc(playerById(pid)?.name||"Owca")}</b> (+3).`);}else lines.push(`🖤 Brak unikalnej Czarnej Owcy.`);
     }
-    if(s.wolfResult)lines.push(wolfResultText(r,c,s.wolfResult));
+    if(st.wolfResult)lines.push(wolfResultText(r,c,st.wolfResult));
   }else if(c.phase==="NO_QUESTIONS")lines.push("⚠️ Skończyła się pula prawidłowych pytań.");
-  return `<div class="status-lines">${lines.map(x=>`<div class="status-line">${x}</div>`).join("")}</div>`;
+  return `<div class="status-lines">${lines.map((x,i)=>`<div class="status-line ${i===0?"status-primary":""}">${x}</div>`).join("")}</div>`;
 }
+
 function renderHistory(r){
-  const h=(r.match?.history||[]).slice(-3).reverse();if(!h.length)return `<div class="muted small">Historia pojawi się po pierwszej rozliczonej rundzie.</div>`;
-  return `<div class="history-list">${h.map(x=>`<div class="history-item"><strong>Runda ${x.round}</strong><div>${esc(truncate(x.question,84))}</div><div class="small muted">${x.type==="quiz"?`Poprawna: ${esc(truncate(x.correctAnswer||x.top,55))}`:`Stado: ${esc(truncate(x.top,55))}${x.blackPlayerId?` • Czarna: ${esc(playerById(x.blackPlayerId,r)?.name||"")}`:""}`}</div></div>`).join("")}</div>`;
+  const x=(r.match?.history||[]).at(-1);if(!x)return `<div class="history-empty">Po pierwszej rundzie pokażemy tu ostatni wynik.</div>`;
+  const result=x.type==="quiz"
+    ? `✅ ${esc(truncate(x.correctAnswer||x.top,48))}`
+    : `🐑 ${esc(truncate(x.top,42))}${x.blackPlayerId?`<br>🖤 ${esc(playerById(x.blackPlayerId,r)?.name||"")}`:""}`;
+  return `<div class="history-list"><div class="history-item"><div class="history-round">RUNDA ${x.round}</div><div class="history-q">${esc(truncate(x.question,72))}</div><div class="history-result">${result}</div></div></div>`;
 }
-function renderScoreRules(r){if(r.config.mode==="quiz")return `<div class="score-rules"><div class="score-rule">🧠 +2 — poprawna odpowiedź</div><div class="score-rule">❌ 0 — odpowiedź błędna / brak głosu</div><div class="score-rule">🧶 ×2 — poprawna z żetonem = +4; błędna = 0 i żeton przepada</div><div class="score-rule">🧶 Start: 2 żetony • zachowany = +1 pkt w finale</div>${r.config.wolfEnabled?`<div class="score-rule">🐺 trafienie +1 / ofiara −2 • pudło −1</div>`:""}</div>`;return `<div class="score-rules"><div class="score-rule">🐑 +2 — jedno największe Stado</div><div class="score-rule">🤝 +1 — remis największych Stad</div><div class="score-rule">🖤 +3 — jedyna samotna Czarna Owca</div><div class="score-rule">🧶 ×2 — Żeton mnoży punkty za głos; niewykorzystany = +1 pkt w finale</div>${r.config.mode!=="warmup"?`<div class="score-rule">✍️ +1 Żeton — autor zwycięskiej odpowiedzi</div>`:`<div class="score-rule">🧶 Rozgrzewka: start z 2 żetonami</div>`}${r.config.wolfEnabled?`<div class="score-rule">🐺 trafienie +1 / ofiara −2 • pudło −1</div>`:""}</div>`;}
+function renderScoreRules(r){
+  if(r.config.mode==="quiz")return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>✅ +2</b><span>DOBRA</span></div><div class="score-rule"><b>❌ 0</b><span>BŁĄD</span></div><div class="score-rule"><b>🧶 ×2</b><span>= +4</span></div><div class="score-rule"><b>🧶 +1</b><span>FINAŁ / SZT.</span></div></div>`;
+  return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🐑 +2</b><span>STADO</span></div><div class="score-rule"><b>🤝 +1</b><span>REMIS</span></div><div class="score-rule"><b>🖤 +3</b><span>CZARNA</span></div><div class="score-rule"><b>🧶 ×2</b><span>TWÓJ GŁOS</span></div>${r.config.mode!=="warmup"?`<div class="score-rule"><b>✍️ +1 🧶</b><span>AUTOR</span></div>`:""}${r.config.wolfEnabled?`<div class="score-rule"><b>🐺 +1/−1</b><span>CEL −2</span></div>`:""}</div>`;
+}
 function progressHTML(done,total){const pct=total?Math.round(done/total*100):0;return `<div class="host-status-line"><div class="progressbar" style="--pct:${pct}%"><span></span></div><b>${done}/${total}</b></div>`;}
 
 function renderHostFinal(r){
   const f=r.match?.finalResult;if(!f)return `<main class="app-shell">${logoHTML()}<h1>Podsumowanie…</h1></main>`;
   if(f.noWinner)return `<main class="app-shell"><div class="topbar">${logoHTML()}<button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div><section class="card pad center"><h1 class="section-title">Gra zakończona przed rozpoczęciem</h1><p>Nie rozegrano żadnej punktowanej rundy.</p><div class="row" style="justify-content:center"><button class="btn" data-action="new-game">Nowa gra</button><button class="btn secondary" data-action="close-room">Powrót do menu</button></div></section></main>`;
   const levels=[...new Set(f.rankings.map(x=>x.place))].filter(x=>x<=3);
-  return `<main class="final-host"><header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">🏆 FINAŁ STADA</span><span class="badge pink">${esc(MODE[r.config.mode].label)}</span></div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
-    <section class="podium">${levels.map(place=>`<div class="podium-level ${place===1?"first":""}"><h3 class="center">${medal(place)} ${place}. miejsce</h3><div class="podium-players">${f.rankings.filter(x=>x.place===place).map(x=>{const p=playerById(x.playerId,r);return `<div class="podium-person">${sheepImg(p)}<b>${esc(p.name)}</b><div>${p.points} pkt</div></div>`;}).join("")}</div></div>`).join("")}</section>
-    <section class="final-main"><div class="card pad"><h2>Wyróżnienia</h2><div class="awards-grid ${r.config.mode==="quiz"?"quiz-awards":""}">${r.config.mode==="quiz"?`${awardCard(r,"🧠 Mózg Stada",f.awards.quiz||[],"Najwięcej poprawnych odpowiedzi w Quizie.")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej ryzykowała Żetonem Wełny.")}`:`${awardCard(r,"🐑 Owca Stada",f.awards.herd,"Najczęściej głosowała z największym Stadem.")}${awardCard(r,"🖤 Czarna Owca Gry",f.awards.black,"Najczęściej była jedyną Czarną Owcą.")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej ryzykowała Żetonem Wełny.")}`}</div></div><div class="card pad"><h2>Klasyfikacja końcowa</h2><div class="ranking">${f.rankings.map(x=>{const p=playerById(x.playerId,r);return `<div class="ranking-row"><b>${x.place}</b>${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))}</div></div><b>${x.points} pkt</b></div>`;}).join("")}</div></div></section>
-    <div class="row" style="justify-content:center"><button class="btn" data-action="replay">↻ Zagraj ponownie</button><button class="btn secondary" data-action="new-game">⚙ Nowa gra</button><button class="btn ghost" data-action="close-room">⌂ Powrót do menu</button></div>${confettiHTML()}</main>`;
+  const finalCount=f.rankings.length;
+  const finalMetrics=finalCount<=4?{avatar:64,podium:88,name:20,score:21}:finalCount<=6?{avatar:56,podium:78,name:18,score:19}:finalCount<=8?{avatar:50,podium:70,name:17,score:18}:finalCount<=10?{avatar:44,podium:62,name:16,score:17}:{avatar:38,podium:56,name:15,score:16};
+  const finalVars=`--final-avatar:${finalMetrics.avatar}px;--podium-avatar:${finalMetrics.podium}px;--final-name:${finalMetrics.name}px;--final-score:${finalMetrics.score}px`;
+  return `<main class="final-host" style="${finalVars}"><header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">🏆 FINAŁ STADA</span><span class="badge pink">${esc(MODE[r.config.mode].label)}</span></div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
+    <section class="podium">${levels.map(place=>{const group=f.rankings.filter(x=>x.place===place);return `<div class="podium-level ${place===1?"first":""} ${group.length>1?"tie":"single"}"><h3 class="podium-title"><span class="podium-medal">${medal(place)}</span><span>${place}. miejsce</span></h3><div class="podium-players">${group.map(x=>{const p=playerById(x.playerId,r);return `<div class="podium-person">${sheepImg(p)}<div class="podium-copy"><b>${esc(p.name)}</b><strong>${p.points} pkt</strong></div></div>`;}).join("")}</div></div>`;}).join("")}</section>
+    <section class="final-main"><div class="card pad final-awards-card"><h2>Wyróżnienia</h2><div class="awards-grid ${r.config.mode==="quiz"?"quiz-awards":""}">${r.config.mode==="quiz"?`${awardCard(r,"🧠 Mózg Stada",f.awards.quiz||[],"Najwięcej poprawnych odpowiedzi")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej grała Żetonem")}`:`${awardCard(r,"🐑 Owca Stada",f.awards.herd,"Najczęściej z największym Stadem")}${awardCard(r,"🖤 Czarna Owca",f.awards.black,"Najczęściej samotnie")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej grała Żetonem")}`}</div></div><div class="card pad final-ranking-card"><h2>Klasyfikacja końcowa</h2><div class="ranking">${f.rankings.map(x=>{const p=playerById(x.playerId,r);return `<div class="ranking-row"><b class="rank-place">${x.place}</b>${sheepImg(p)}<div class="ranking-copy"><b class="ranking-name">${esc(p.name)}</b><span class="ranking-type">${esc(sheepType(p))}</span><strong class="ranking-score">${x.points} pkt</strong></div></div>`;}).join("")}</div></div></section>
+    <div class="final-actions"><div class="row"><button class="btn" data-action="replay">↻ Zagraj ponownie</button><button class="btn secondary" data-action="new-game">⚙ Nowa gra</button><button class="btn ghost" data-action="close-room">⌂ Powrót do menu</button></div>${versionHTML()}</div>${confettiHTML()}</main>`;
 }
-function awardCard(r,title,ids,desc){return `<div class="award-card"><h3>${title}</h3>${ids.length?ids.map(id=>{const p=playerById(id,r);return `<div>${sheepImg(p)}<b>${esc(p?.name||"")}</b></div>`;}).join(""):`<div class="muted">Nie przyznano</div>`}<p class="small muted">${esc(desc)}</p></div>`;}
+function awardCard(r,title,ids,desc){return `<div class="award-card"><h3>${title}</h3><div class="award-people">${ids.length?ids.map(id=>{const p=playerById(id,r);return `<div class="award-person">${sheepImg(p)}<div><b>${esc(p?.name||"")}</b><span>${esc(sheepType(p))}</span></div></div>`;}).join(""):`<div class="muted">Nie przyznano</div>`}</div><p>${esc(desc)}</p></div>`;}
 function confettiHTML(){return `<div class="confetti">${Array.from({length:28},(_,i)=>`<i style="--x:${(i*37)%100}%;--d:${4+(i%5)}s;--r:${i*31}deg;--c:${COLORS[i%5].hex}"></i>`).join("")}</div>`;}
 
 /* -------------------- PHONE RENDER -------------------- */
@@ -2087,7 +2230,7 @@ function renderPhoneFinal(s){
   if(f.noWinner)return `<div class="final-box center"><h1>Gra zakończona</h1><p>Nie rozegrano żadnej punktowanej rundy.</p></div>`;
   const rank=f.rankings.find(x=>x.playerId===me.playerId)?.place||me.stats.finalPlace;
   const myAwards=[];if(s.config.mode==="quiz"&&(f.awards.quiz||[]).includes(me.playerId))myAwards.push("🧠 Mózg Stada");if(s.config.mode!=="quiz"&&f.awards.herd.includes(me.playerId))myAwards.push("🐑 Owca Stada");if(s.config.mode!=="quiz"&&f.awards.black.includes(me.playerId))myAwards.push("🖤 Czarna Owca Gry");if(f.awards.allIn.includes(me.playerId))myAwards.push("🧶 Owca All-In");
-  return `<div class="final-box center">${imgHTML(sh.smallAvatar,sh.name,"final-avatar")}<h1>${rank===1?"🏆 Wygrywasz!":`Finał: ${rank}. miejsce`}</h1><h2>${esc(me.name)} — ${esc(sh.name)}</h2><div class="final-score">${me.points} pkt</div><div class="stack" style="text-align:left;margin-top:14px"><div class="result-row"><span>Przed wymianą żetonów</span><b>${me.stats.scoreBeforeRedemption} pkt</b></div><div class="result-row"><span>Bonus za zachowane żetony</span><b>+${me.stats.tokenBonusPoints} pkt</b></div>${s.config.mode==="quiz"?`<div class="result-row"><span>Poprawne odpowiedzi</span><b>${me.stats.quizCorrect||0}×</b></div><div class="result-row"><span>Błędne odpowiedzi</span><b>${me.stats.quizWrong||0}×</b></div>`:`<div class="result-row"><span>Ze Stadem</span><b>${me.stats.herdWins}×</b></div><div class="result-row"><span>Czarna Owca</span><b>${me.stats.blackSheepWins}×</b></div>`}<div class="result-row"><span>Użyte Żetony Wełny</span><b>${me.stats.tokensUsed}×</b></div><div class="result-row"><span>Wilk — trafienia / pudła / rezygnacje</span><b>${me.stats.wolfHits}/${me.stats.wolfMisses}/${me.stats.wolfSkipped}</b></div></div>${myAwards.length?`<div class="award-list" style="margin-top:14px">${myAwards.map(a=>`<div class="award">${a}</div>`).join("")}</div>`:""}<div class="hint-box final-text" style="margin-top:14px;text-align:left"><b>Twój raport ze Stada</b>${sum.sentences.map(t=>`<p>${esc(t)}</p>`).join("")}</div><button class="btn" data-action="replay-ready" style="margin-top:14px">↻ Chcę rewanżu</button><p class="small muted">Prowadzący decyduje o ponownym starcie.</p></div>`;
+  return `<div class="final-box center">${imgHTML(sh.smallAvatar,sh.name,"final-avatar")}<h1>${rank===1?"🏆 Wygrywasz!":`Finał: ${rank}. miejsce`}</h1><h2>${esc(me.name)} — ${esc(sh.name)}</h2><div class="final-score">${me.points} pkt</div><div class="stack" style="text-align:left;margin-top:14px"><div class="result-row"><span>Przed wymianą żetonów</span><b>${me.stats.scoreBeforeRedemption} pkt</b></div><div class="result-row"><span>Bonus za zachowane żetony</span><b>+${me.stats.tokenBonusPoints} pkt</b></div>${s.config.mode==="quiz"?`<div class="result-row"><span>Poprawne odpowiedzi</span><b>${me.stats.quizCorrect||0}×</b></div><div class="result-row"><span>Błędne odpowiedzi</span><b>${me.stats.quizWrong||0}×</b></div>`:`<div class="result-row"><span>Ze Stadem</span><b>${me.stats.herdWins}×</b></div><div class="result-row"><span>Czarna Owca</span><b>${me.stats.blackSheepWins}×</b></div>`}<div class="result-row"><span>Użyte Żetony Wełny</span><b>${me.stats.tokensUsed}×</b></div>${s.config.mode!=="quiz"?`<div class="result-row"><span>Wilk — trafienia / pudła / rezygnacje</span><b>${me.stats.wolfHits}/${me.stats.wolfMisses}/${me.stats.wolfSkipped}</b></div>`:""}</div>${myAwards.length?`<div class="award-list" style="margin-top:14px">${myAwards.map(a=>`<div class="award">${a}</div>`).join("")}</div>`:""}<div class="hint-box final-text" style="margin-top:14px;text-align:left"><b>Twój raport ze Stada</b>${sum.sentences.map(t=>`<p>${esc(t)}</p>`).join("")}</div><button class="btn" data-action="replay-ready" style="margin-top:14px">↻ Chcę rewanżu</button><p class="small muted">Prowadzący decyduje o ponownym starcie.</p></div>`;
 }
 
 function buildPersonalFinalSummary(r,pl){
@@ -2155,6 +2298,7 @@ function afterRender(){
     requestWakeLock();
     fitHostAnswerText();
     fitWhichSheepCards();
+    fitHostInfoText();
   }
 }
 function fitWhichSheepCards(){
@@ -2178,15 +2322,33 @@ function fitWhichSheepCards(){
     });
   });
 }
+function fitHostInfoText(){
+  const panel=document.querySelector(".host-info-panel");
+  const box=panel?.querySelector(".status-lines");
+  if(!panel||!box||!panel.clientWidth||!panel.clientHeight)return;
+  box.style.fontSize="";
+  const maxSize=Math.min(21,Math.max(15,panel.clientWidth*.057));
+  const minSize=10.5;
+  let low=minSize,high=maxSize,best=minSize;
+  for(let i=0;i<9;i++){
+    const mid=(low+high)/2;
+    box.style.fontSize=`${mid}px`;
+    const fits=panel.scrollHeight<=panel.clientHeight+1 && panel.scrollWidth<=panel.clientWidth+1;
+    if(fits){best=mid;low=mid;}else high=mid;
+  }
+  box.style.fontSize=`${Math.floor(best*10)/10}px`;
+  panel.classList.toggle("status-compact",best<12.5);
+}
+
 function fitHostAnswerText(){
   document.querySelectorAll(".answer-card .answer-text").forEach(text=>{
     const card=text.closest(".answer-card");
     if(!card||!card.clientWidth||!card.clientHeight)return;
     text.style.fontSize="";
-    const maxSize=Math.min(32,Math.max(18,Math.min(card.clientWidth*.085,card.clientHeight*.24)));
-    const minSize=11;
+    const maxSize=Math.min(46,Math.max(24,Math.min(card.clientWidth*.16,card.clientHeight*.34)));
+    const minSize=13;
     let low=minSize,high=maxSize,best=minSize;
-    for(let i=0;i<8;i++){
+    for(let i=0;i<9;i++){
       const mid=(low+high)/2;
       text.style.fontSize=`${mid}px`;
       const fits=card.scrollHeight<=card.clientHeight+1 && card.scrollWidth<=card.clientWidth+1;
@@ -2276,7 +2438,7 @@ function releaseWakeLock(){try{runtime.host.wakeLock?.release();}catch{}runtime.
 
 
 
-function formatTimeSetting(sec){sec=clamp(+sec,20,120);return sec<60?`${sec} s`:sec===60?"1 min":sec===120?"2 min":`${Math.floor(sec/60)} min ${sec%60} s`;}
+function formatTimeSetting(sec){sec=clamp(+sec,10,120);return sec<60?`${sec} s`:sec===60?"1 min":sec===120?"2 min":`${Math.floor(sec/60)} min ${sec%60} s`;}
 function countdownHTML(c,compact=false){
   if(!c?.phaseDeadlineAt||!isTimedPhase(c.phase))return "";
   const left=Math.max(0,Math.ceil((c.phaseDeadlineAt-Date.now())/1000));

@@ -115,6 +115,20 @@ input[type=range]{width:100%;accent-color:var(--pink)}
 .choice-row{display:flex;gap:10px;flex-wrap:wrap}
 .choice{border:2px solid #d8d7e3;background:#fff;color:#262039;border-radius:14px;padding:12px 18px;font-weight:950;min-width:56px}
 .choice.active{border-color:var(--pink);background:#fff0f6;color:#cf286d}
+
+.timer-select{max-width:320px;font-weight:900;background:#fff;color:#211b32}
+.quiz-config-block{display:grid;gap:12px;margin-top:22px}
+.quiz-config-block .subhead{margin:2px 0 0}
+.quiz-difficulty-row .choice{flex:1 1 120px}
+.quiz-category-heading{margin-top:2px}
+.quiz-category-heading .subhead{margin:0}
+.quiz-all-btn{min-height:38px;padding:8px 12px;font-size:.85rem}
+.quiz-all-btn.active{outline:3px solid rgba(255,79,145,.25)}
+.quiz-category-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.quiz-category{border:2px solid #d8d7e3;background:#fff;color:#262039;border-radius:14px;padding:10px 12px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:center;text-align:left;min-height:54px;font-weight:850}
+.quiz-category span{font-size:1.2rem}.quiz-category b{font-size:.88rem;line-height:1.16}
+.quiz-category.active{border-color:var(--pink);background:#fff0f6;color:#b92162;box-shadow:0 0 0 2px rgba(255,79,145,.10)}
+
 .info-list{display:grid;gap:10px;margin:14px 0}
 .info-item{padding:13px 15px;border-radius:14px;background:rgba(255,255,255,.07);border:1px solid var(--line)}
 .info-item strong{color:#fff}
@@ -302,6 +316,7 @@ body.player-mode{background-attachment:fixed}
   .config-grid{grid-template-columns:1fr}.mode-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.player-lobby-grid{grid-template-columns:repeat(3,1fr)}
 }
 @media(max-width:720px){
+  .quiz-category-grid{grid-template-columns:1fr}
   .app-shell{padding:14px}
   .start-actions{grid-template-columns:1fr}.start-panel h1{font-size:52px}
   .mode-cards{grid-template-columns:1fr}
@@ -337,4 +352,127 @@ body.player-mode{background-attachment:fixed}
 @media(max-height:760px) and (orientation:landscape){
   .final-host{grid-template-rows:auto auto minmax(0,1fr) auto}
   .podium-level{padding:7px}.podium-person img{width:46px;height:46px}
+}
+
+
+/* v1.1.2 — czytelniejszy ekran główny i finał */
+body::before{display:none!important}
+body{
+  background:
+    radial-gradient(ellipse at 18% 16%,rgba(33,133,214,.23),transparent 42%),
+    radial-gradient(ellipse at 84% 14%,rgba(215,59,207,.20),transparent 44%),
+    radial-gradient(ellipse at 50% 92%,rgba(76,45,135,.22),transparent 48%),
+    linear-gradient(118deg,#0d234d 0%,#262653 50%,#552967 100%);
+}
+
+/* Główny ekran: więcej miejsca na ranking i czytelne panele informacyjne. */
+.host-grid{grid-template-columns:minmax(220px,22%) minmax(0,55%) minmax(240px,23%);gap:10px}
+.host-panel{background:linear-gradient(160deg,rgba(17,22,55,.76),rgba(28,20,55,.72));border-color:rgba(255,255,255,.10);box-shadow:0 10px 28px rgba(0,0,0,.12)}
+.host-panel h3{font-size:clamp(16px,1.35vw,22px);margin-bottom:10px}
+.host-right{grid-template-rows:minmax(112px,.85fr) minmax(128px,1fr) minmax(150px,1.15fr);gap:10px}
+.host-right .host-panel{padding:clamp(10px,1vw,15px)}
+
+/* Ranking graczy — skala zależy od liczby graczy przez zmienne ustawiane w JS. */
+.host-player-list{gap:5px}
+.host-player{gap:clamp(7px,.8vw,12px);padding:clamp(5px,.55vw,9px);border-radius:14px;background:linear-gradient(90deg,rgba(255,255,255,.075),rgba(255,255,255,.035))}
+.host-player img{width:var(--host-avatar,68px);height:var(--host-avatar,68px);max-width:112px;max-height:112px;border:2px solid rgba(255,255,255,.16);box-shadow:0 4px 12px rgba(0,0,0,.18)}
+.host-player-copy{min-width:0}
+.host-player .pn{font-size:var(--host-name,15px);line-height:1.05;font-weight:1000}
+.host-player .pt{font-size:var(--host-type,10px);line-height:1.08;margin-top:3px}
+.host-player .res{display:grid;gap:3px;font-size:var(--host-score,15px);font-weight:1000;text-align:right}
+.resource{display:flex;align-items:center;justify-content:flex-end;gap:4px;line-height:1}
+.resource-icon{font-size:var(--host-icon,18px);filter:drop-shadow(0 2px 3px rgba(0,0,0,.25))}
+.resource b{min-width:1.35em;text-align:left;font-size:1em}
+
+/* Grafika główna ma wizualnie przechodzić w tło zamiast siedzieć w osobnym prostokącie. */
+.main-scene{position:relative;background:radial-gradient(ellipse at center,rgba(92,66,151,.16),transparent 72%);border:0;box-shadow:none;border-radius:28px;overflow:hidden}
+.main-scene img{transform:scale(1.16);filter:drop-shadow(0 20px 24px rgba(0,0,0,.24));-webkit-mask-image:radial-gradient(ellipse 92% 90% at 50% 50%,#000 58%,rgba(0,0,0,.96) 72%,transparent 100%);mask-image:radial-gradient(ellipse 92% 90% at 50% 50%,#000 58%,rgba(0,0,0,.96) 72%,transparent 100%)}
+.scene-wrap img,.prologue-scene img{filter:drop-shadow(0 20px 32px rgba(0,0,0,.25));-webkit-mask-image:radial-gradient(ellipse 96% 94% at 50% 50%,#000 72%,rgba(0,0,0,.9) 86%,transparent 100%);mask-image:radial-gradient(ellipse 96% 94% at 50% 50%,#000 72%,rgba(0,0,0,.9) 86%,transparent 100%)}
+
+/* Pytania i odpowiedzi — możliwie duża typografia z automatycznym fitowaniem JS. */
+.question-card{font-size:clamp(19px,2.05vw,32px);line-height:1.12;padding:clamp(10px,1.35vh,16px) clamp(16px,1.55vw,26px)}
+.question-meta{font-size:.62em;margin-bottom:4px;letter-spacing:.025em}
+.answer-letter{font-size:clamp(26px,2.55vw,42px)}
+.answer-text{font-size:clamp(16px,1.65vw,28px);line-height:1.06;font-weight:950}
+.answer-card .vote-count{font-size:clamp(11px,.92vw,15px)}
+.voter-chip{font-size:clamp(9px,.72vw,12px);padding:3px 7px}
+.quiz-correct-label{font-size:clamp(9px,.78vw,13px)}
+
+/* Prawy bok — mniej treści, większy tekst. */
+.status-lines,.history-list{font-size:clamp(13px,1.05vw,17px);line-height:1.22;gap:7px}
+.status-line{padding:9px 10px;border-radius:12px;background:rgba(255,255,255,.055)}
+.status-line.status-primary{font-size:1.08em;background:rgba(57,198,233,.11);border:1px solid rgba(57,198,233,.18)}
+.history-empty{font-size:clamp(13px,1vw,16px);line-height:1.3;color:var(--muted)}
+.history-item{padding:10px;border-radius:13px;background:rgba(255,255,255,.055)}
+.history-round{font-weight:1000;color:#ffd86a;font-size:.88em;letter-spacing:.04em;margin-bottom:5px}
+.history-q{font-weight:850;line-height:1.18}
+.history-result{margin-top:7px;font-weight:950;color:#fff}
+.score-rules-simple{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;font-size:inherit}
+.score-rules-simple .score-rule{display:grid;gap:2px;align-content:center;min-height:58px;padding:8px 9px;text-align:center;border-radius:12px;background:rgba(255,255,255,.06)}
+.score-rules-simple .score-rule b{font-size:clamp(15px,1.22vw,20px);line-height:1.05}
+.score-rules-simple .score-rule span{font-size:clamp(9px,.76vw,12px);font-weight:900;letter-spacing:.045em;color:#d7daeb}
+
+/* Finał — duże avatary, nazwy i punkty obok siebie. */
+.final-host{gap:10px;background:transparent}
+.podium{gap:10px}
+.podium-level{padding:10px 13px;display:grid;grid-template-rows:auto 1fr;min-height:0;background:linear-gradient(145deg,rgba(255,255,255,.075),rgba(255,255,255,.035))}
+.podium-title{margin:0 0 6px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:clamp(17px,1.55vw,24px)}
+.podium-medal{font-size:clamp(25px,2.5vw,40px);line-height:1}
+.podium-players{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;min-height:0}
+.podium-person{display:grid;grid-template-columns:var(--podium-avatar,70px) minmax(0,1fr);gap:10px;align-items:center;text-align:left;min-width:min(220px,100%);max-width:100%}
+.podium-person img{width:var(--podium-avatar,70px);height:var(--podium-avatar,70px);border-radius:50%;object-fit:cover;margin:0;border:3px solid rgba(255,255,255,.65)}
+.podium-copy{min-width:0;display:grid;gap:2px}
+.podium-copy b{font-size:var(--final-name,17px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.podium-copy strong{font-size:var(--final-score,18px);color:var(--yellow)}
+.podium-level.tie .podium-person{grid-template-columns:min(var(--podium-avatar,70px),58px) minmax(0,1fr);min-width:145px;flex:1 1 145px}
+.podium-level.tie .podium-person img{width:min(var(--podium-avatar,70px),58px);height:min(var(--podium-avatar,70px),58px)}
+
+.final-main{grid-template-columns:.92fr 1.08fr;gap:10px}
+.final-main>.card{padding:clamp(12px,1.25vw,20px)}
+.final-main h2{font-size:clamp(20px,1.8vw,28px);margin:0 0 10px}
+.awards-grid{gap:9px}.award-card{padding:10px;text-align:left;display:grid;align-content:start;gap:8px}.award-card h3{font-size:clamp(15px,1.35vw,21px);margin:0;text-align:center}.award-card p{font-size:clamp(10px,.82vw,13px);margin:0;color:var(--muted);text-align:center}.award-people{display:grid;gap:6px}.award-person{display:grid;grid-template-columns:var(--final-avatar,50px) minmax(0,1fr);gap:8px;align-items:center}.award-person img{width:var(--final-avatar,50px);height:var(--final-avatar,50px);border-radius:50%;object-fit:cover;margin:0}.award-person>div{min-width:0;display:grid}.award-person b{font-size:var(--final-name,17px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.award-person span{font-size:clamp(9px,.75vw,12px);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.ranking{gap:6px;padding-right:4px}
+.ranking-row{grid-template-columns:34px var(--final-avatar,50px) minmax(0,1fr);gap:9px;padding:7px 9px;min-height:calc(var(--final-avatar,50px) + 12px);background:linear-gradient(90deg,rgba(255,255,255,.075),rgba(255,255,255,.035));border-radius:12px}
+.ranking-row img{width:var(--final-avatar,50px);height:var(--final-avatar,50px)}
+.rank-place{font-size:clamp(16px,1.25vw,21px);text-align:center}
+.ranking-copy{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name score" "type score";column-gap:10px;align-items:center;min-width:0}
+.ranking-name{grid-area:name;font-size:var(--final-name,17px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ranking-type{grid-area:type;font-size:clamp(9px,.78vw,12px);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ranking-score{grid-area:score;font-size:var(--final-score,18px);color:var(--yellow);white-space:nowrap}
+.final-actions{display:flex;align-items:center;justify-content:center;gap:16px;min-width:0}.final-actions>.row{justify-content:center}.final-actions .app-version{margin-left:auto}
+
+@media(max-height:720px) and (orientation:landscape){
+  .host-grid{grid-template-columns:minmax(200px,21.5%) minmax(0,55%) minmax(220px,23.5%)}
+  .host-right{grid-template-rows:minmax(92px,.82fr) minmax(104px,.95fr) minmax(126px,1.05fr)}
+  .host-panel h3{font-size:clamp(14px,1.2vw,19px);margin-bottom:6px}
+  .status-lines,.history-list{font-size:clamp(11px,.93vw,15px);gap:5px}
+  .status-line,.history-item{padding:6px 7px}
+  .score-rules-simple{gap:5px}.score-rules-simple .score-rule{min-height:46px;padding:5px 6px}.score-rules-simple .score-rule b{font-size:clamp(13px,1.04vw,17px)}
+  .question-card{font-size:clamp(17px,1.8vw,27px)}
+  .final-main h2{font-size:clamp(17px,1.55vw,23px)}
+  .podium-title{font-size:clamp(15px,1.35vw,20px)}
+  .podium-medal{font-size:clamp(22px,2.1vw,32px)}
+}
+
+
+/* v1.1.3 — bogatsza sekcja „Teraz” + klikalny prolog */
+.host-right{grid-template-rows:minmax(150px,1.15fr) minmax(105px,.78fr) minmax(145px,1.07fr)}
+.host-info-panel{display:flex;flex-direction:column;min-height:0}
+.host-info-panel h3{flex:0 0 auto;margin-bottom:8px}
+.host-info-panel .status-lines{min-height:0;overflow:hidden;font-size:clamp(14px,1.18vw,19px);line-height:1.17;gap:clamp(5px,.58vh,8px)}
+.host-info-panel .status-line{padding:clamp(6px,.62vh,9px) clamp(8px,.72vw,11px);font-weight:800;overflow-wrap:anywhere}
+.host-info-panel .status-line b{font-weight:1000}
+.host-info-panel .status-line.status-primary{font-size:1.08em}
+.host-info-panel.status-compact .status-lines{gap:4px;line-height:1.12}
+.host-info-panel.status-compact .status-line{padding:5px 7px}
+
+.prologue-clickable{cursor:pointer;user-select:none;-webkit-user-select:none}
+.prologue-click-hint{display:inline-flex;margin-top:2px;padding:7px 13px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);font-size:clamp(12px,1vw,16px);font-weight:800;color:rgba(255,255,255,.78)}
+.prologue-clickable .btn,.prologue-clickable input,.prologue-clickable label{cursor:pointer}
+
+@media(max-height:720px) and (orientation:landscape){
+  .host-right{grid-template-rows:minmax(120px,1.08fr) minmax(90px,.78fr) minmax(120px,1.02fr)}
+  .host-info-panel .status-lines{font-size:clamp(11px,.95vw,15px)}
+  .prologue-click-hint{padding:5px 10px;font-size:12px}
 }
