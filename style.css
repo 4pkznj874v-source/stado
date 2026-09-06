@@ -1211,3 +1211,6 @@ html[data-device-profile="phone"] .mode-cards{grid-template-columns:repeat(2,min
   .runner-podium{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:none}
   .final-main{grid-template-columns:1fr;overflow:visible}
 }
+
+/* v1.3.2 — osobny sygnał zakończenia czasu */
+.timer-end-setting{margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.10)}

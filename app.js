@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.3.1";
+const APP_VERSION = "1.3.2";
 const PROTOCOL_VERSION = "stado-v2";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -51,7 +51,8 @@ const CONFIG_HELP = {
   modeQuiz: "Quiz: 5 odpowiedzi, dokładnie jedna poprawna. Wybierasz poziom i pulę kategorii. Przed kolejnymi blokami maksymalnie 5 pytań gracze głosują na kategorię. Bez Czarnej Owcy i Wilka.",
   questionTypes: "W STADO są trzy rodzaje rund społecznych: 1) „Co robi Stado?” — wybieracie odpowiedź i liczy się największe Stado; 2) „Która Owca?” — wskazujecie osobę i nadal liczy się największe Stado; 3) „Co zrobi dana Owca?” — losowana jest Owca pod lupą, która wybiera swoją odpowiedź i zawsze dostaje +1 pkt, a pozostali próbują przewidzieć jej wybór za +2 pkt (lub +4 z Żetonem).",
   music: "Domyślna muzyka zmienia się zależnie od etapu i trybu gry. Możesz pozostawić tryb Domyślny albo wymusić jeden z 10 utworów z folderu music. Zmiana wyboru od razu próbuje odtworzyć wskazany utwór.",
-  countdownTick: "Opcjonalne, delikatne piknięcie na ekranie prowadzącego przy 5, 4, 3, 2 i 1 sekundzie. Głośność sygnału ustawiasz niezależnie od muzyki.",
+  countdownTick: "Opcjonalne piknięcie na ekranie prowadzącego przy 5, 4, 3, 2 i 1 sekundzie. Głośność sygnału ustawiasz niezależnie od muzyki.",
+  timerEnd: "Osobny sygnał przy 0:00. Odtwarzany jest z pliku music/timer-end.mp3 i informuje, że czas właśnie się skończył. Korzysta z tej samej głośności co piknięcia stopera.",
   visualSettings: "Ustawienia grafiki dotyczą tylko ekranu, na którym je otwierasz. Profil urządzenia pomaga dopasować całą grę do telefonu, tabletu, laptopa lub telewizora. Ustawienia są pamiętane do pełnego wyjścia do menu głównego."
 };
 const PROLOGUE = [
@@ -137,7 +138,7 @@ const runtime = {
     drafts:{question:"", answer:"", hardcoreType:"open", voteOptionId:"", useToken:false, huntTargetId:"", huntOptionId:"", categoryKey:"", categoryUseToken:false, categoryTieKey:""},
     waitingRecovery:false, reconnecting:false, lastAttemptId:null
   },
-  audio: {track:0, defaultTrack:1, manualTrack:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:"", tickEnabled:true, tickVolume:1, lastTickKey:"", tickContext:null},
+  audio: {track:0, defaultTrack:1, manualTrack:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:"", tickEnabled:true, tickVolume:1, endEnabled:true, lastTickKey:"", lastEndKey:"", tickContext:null},
   visual: loadVisualPrefs(),
   data: normalizeQuestionData(rawQuestions),
   quizData: normalizeQuizData(rawQuizQuestions),
@@ -256,7 +257,7 @@ function handleClick(e){
     return;
   }
   if(a === "music-default"){ runtime.audio.manualTrack=0;saveAudioPrefs();playMusic(currentDefaultMusicTrack(),true);render();return; }
-  if(a === "audio-volume-reset"){ runtime.audio.volume=.35;runtime.audio.tickVolume=1;runtime.audio.muted=false;syncAudioElements();saveAudioPrefs();render();return; }
+  if(a === "audio-volume-reset"){ runtime.audio.volume=.35;runtime.audio.tickVolume=1;runtime.audio.muted=false;syncAudioElements();syncTimerEndAudio();saveAudioPrefs();render();return; }
   if(a === "close-modal"){ hideFloatingTooltip(); runtime.modal = null; render(); return; }
 
   if(a === "settings-new-game"){
@@ -467,6 +468,9 @@ function handleChange(e){
   }
   if("tickEnabled" in t.dataset){
     runtime.audio.tickEnabled=!!t.checked;saveAudioPrefs();unlockTickAudio();render();return;
+  }
+  if("endSoundEnabled" in t.dataset){
+    runtime.audio.endEnabled=!!t.checked;saveAudioPrefs();syncTimerEndAudio();render();return;
   }
   if("categoryTokenToggle" in t.dataset){
     runtime.player.drafts.categoryUseToken = !!t.checked;
@@ -1068,6 +1072,7 @@ function resumePhaseTimer(r){
 function handlePhaseTimeout(attemptId,phase){
   const r=runtime.host.room,c=currentAttempt(r);
   if(!r||!c||c.attemptId!==attemptId||c.phase!==phase||r.paused||c.settlement)return;
+  playTimerEndSound(`${attemptId}:${phase}`);
   clearPhaseTimer();c.phaseDeadlineAt=0;c.phaseRemainingMs=0;c.phaseTimedOut=true;c.timeoutPhase=phase;
   if(phase==="CATEGORY_VOTING"){
     c.timedOutPlayerIds=activePlayers(r).filter(pl=>!c.categoryVotes?.[pl.playerId]).map(pl=>pl.playerId);
@@ -2679,7 +2684,7 @@ function renderSettingsModal(){
       <div class="music-choice-row"><select class="select" data-music-track>${musicOptions}</select><button class="btn secondary music-default-btn" data-action="music-default">↺ Domyślna</button></div>
       <div class="spread"><label class="form-label">Głośność muzyki</label><span class="settings-track-badge" data-music-volume-value>${volume}%</span></div><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1">
       <label class="row settings-mute"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label>
-      <div class="countdown-sound-settings"><div class="spread"><span class="setting-title">⏱ Piknięcie ostatnich 5 sekund ${infoTip("countdownTick","Jak działa sygnał końcówki?")}</span><label class="switch" aria-label="Włącz lub wyłącz piknięcia stopera"><input type="checkbox" data-tick-enabled ${runtime.audio.tickEnabled?"checked":""}><span></span></label></div><div class="spread tick-volume-label"><span>Głośność piknięcia</span><b data-tick-volume-value>${Math.round(runtime.audio.tickVolume*100)}%</b></div><input type="range" min="0" max="100" step="5" value="${Math.round(runtime.audio.tickVolume*100)}" data-tick-volume="1"></div>
+      <div class="countdown-sound-settings"><div class="spread"><span class="setting-title">⏱ Piknięcie ostatnich 5 sekund ${infoTip("countdownTick","Jak działa sygnał końcówki?")}</span><label class="switch" aria-label="Włącz lub wyłącz piknięcia stopera"><input type="checkbox" data-tick-enabled ${runtime.audio.tickEnabled?"checked":""}><span></span></label></div><div class="spread timer-end-setting"><span class="setting-title">🔔 Dźwięk końca czasu 0:00 ${infoTip("timerEnd","Co dzieje się przy 0:00?")}</span><label class="switch" aria-label="Włącz lub wyłącz dźwięk końca czasu"><input type="checkbox" data-end-sound-enabled ${runtime.audio.endEnabled?"checked":""}><span></span></label></div><div class="spread tick-volume-label"><span>Głośność sygnałów stopera</span><b data-tick-volume-value>${Math.round(runtime.audio.tickVolume*100)}%</b></div><input type="range" min="0" max="100" step="5" value="${Math.round(runtime.audio.tickVolume*100)}" data-tick-volume="1"></div>
       <div class="row wrap audio-reset-row"><button class="btn ghost" data-action="audio-volume-reset">↺ DOMYŚLNE GŁOŚNOŚCI</button><span class="small muted">Muzyka 35% • piknięcie 100%</span></div>
       <div class="row wrap settings-tools"><button class="btn secondary" data-action="open-graphics-settings">🎨 USTAWIENIA GRAFIKI</button>${infoTip("visualSettings","Co można zmienić?")}</div>
     </div>
@@ -2877,7 +2882,7 @@ function applyVisualSettingsToDOM(){
 function resetPresentationPrefs(){
   try{localStorage.removeItem(VISUAL_STORAGE_KEY);localStorage.removeItem(AUDIO_STORAGE_KEY);}catch{}
   runtime.visual={...VISUAL_DEFAULTS,device:"auto"};
-  runtime.audio.manualTrack=0;runtime.audio.volume=.35;runtime.audio.muted=false;runtime.audio.tickEnabled=true;runtime.audio.tickVolume=1;runtime.audio.lastTickKey="";
+  runtime.audio.manualTrack=0;runtime.audio.volume=.35;runtime.audio.muted=false;runtime.audio.tickEnabled=true;runtime.audio.tickVolume=1;runtime.audio.endEnabled=true;runtime.audio.lastTickKey="";runtime.audio.lastEndKey="";
   syncAudioElements();applyVisualSettings();
 }
 function loadAudioPrefs(){
@@ -2887,14 +2892,15 @@ function loadAudioPrefs(){
     runtime.audio.manualTrack=clamp(+(a.manualTrack||0),0,AUDIO_TRACK_COUNT);
     runtime.audio.tickEnabled=a.tickEnabled!==false;
     runtime.audio.tickVolume=a.prefsVersion===AUDIO_PREFS_VERSION&&typeof a.tickVolume==="number"?clamp(a.tickVolume,0,1):1;
+    runtime.audio.endEnabled=a.endEnabled!==false;
   }
-  syncAudioElements();
+  syncAudioElements();syncTimerEndAudio();
 }
 function syncAudioElements(){for(let i=1;i<=AUDIO_TRACK_COUNT;i++){const el=document.getElementById(`music${i}`);if(el){el.volume=runtime.audio.muted?0:runtime.audio.volume;}}}
 function setAudioVolume(v){runtime.audio.volume=clamp(v,0,1);syncAudioElements();saveAudioPrefs();}
-function setTickVolume(v){runtime.audio.tickVolume=clamp(v,0,1);saveAudioPrefs();}
+function setTickVolume(v){runtime.audio.tickVolume=clamp(v,0,1);syncTimerEndAudio();saveAudioPrefs();}
 function setMuted(v){runtime.audio.muted=!!v;syncAudioElements();saveAudioPrefs();render();}
-function saveAudioPrefs(){try{localStorage.setItem(AUDIO_STORAGE_KEY,JSON.stringify({prefsVersion:AUDIO_PREFS_VERSION,volume:runtime.audio.volume,muted:runtime.audio.muted,manualTrack:runtime.audio.manualTrack,tickEnabled:runtime.audio.tickEnabled,tickVolume:runtime.audio.tickVolume}));}catch{}}
+function saveAudioPrefs(){try{localStorage.setItem(AUDIO_STORAGE_KEY,JSON.stringify({prefsVersion:AUDIO_PREFS_VERSION,volume:runtime.audio.volume,muted:runtime.audio.muted,manualTrack:runtime.audio.manualTrack,tickEnabled:runtime.audio.tickEnabled,tickVolume:runtime.audio.tickVolume,endEnabled:runtime.audio.endEnabled}));}catch{}}
 function currentDefaultMusicTrack(){
   const r=runtime.host.room;
   if(r?.status==="PROLOGUE")return 1;
@@ -2943,6 +2949,22 @@ function unlockTickAudio(){
   if(typeof window==="undefined")return null;
   const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;
   try{if(!runtime.audio.tickContext)runtime.audio.tickContext=new AC();if(runtime.audio.tickContext.state==="suspended")runtime.audio.tickContext.resume().catch(()=>{});return runtime.audio.tickContext;}catch{return null;}
+}
+function syncTimerEndAudio(){
+  const el=document.getElementById("timerEndSound");
+  if(el){el.volume=clamp(runtime.audio.tickVolume,0,1);el.muted=false;}
+}
+function playTimerEndSound(key=""){
+  if(runtime.role!=="host"||!runtime.audio.endEnabled||runtime.audio.tickVolume<=0)return;
+  if(key&&runtime.audio.lastEndKey===key)return;
+  if(key)runtime.audio.lastEndKey=key;
+  const el=document.getElementById("timerEndSound");
+  if(!el)return;
+  try{
+    el.pause();el.currentTime=0;el.muted=false;el.volume=clamp(runtime.audio.tickVolume,0,1);
+    const pr=el.play();
+    if(pr&&typeof pr.catch==="function")pr.catch(()=>{});
+  }catch{}
 }
 function playCountdownTick(left){
   if(runtime.role!=="host"||!runtime.audio.tickEnabled||runtime.audio.tickVolume<=0||left<1||left>5)return;
