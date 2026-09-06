@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.1.7";
+const APP_VERSION = "1.1.9";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -50,8 +50,9 @@ const CONFIG_HELP = {
   modeHardcore: "Sandbox: Baran tworzy pytanie, a przy pytaniu otwartym wybrane Owce tworzą odpowiedzi. To najbardziej kreatywny wariant gry.",
   modeQuiz: "Quiz: 5 odpowiedzi, dokładnie jedna poprawna. Wybierasz poziom i kategorie. Bez Czarnej Owcy, Barana i Wilka.",
   questionTypes: "W STADO są trzy rodzaje rund społecznych: 1) „Co robi Stado?” — wybieracie odpowiedź i liczy się największe Stado; 2) „Która Owca?” — wskazujecie osobę i nadal liczy się największe Stado; 3) „Co zrobi dana Owca?” — losowana jest Owca pod lupą, która wybiera swoją odpowiedź i zawsze dostaje +1 pkt, a pozostali próbują przewidzieć jej wybór za +2 pkt (lub +4 z Żetonem).",
-  musicTest: "TEST MUZYKI uruchamia od początku utwór przypisany do aktualnego trybu. Test automatycznie wyłącza wyciszenie i ustawia słyszalną głośność, jeśli była bardzo niska. Jeśli nadal nic nie słychać, sprawdź głośność urządzenia i tryb cichy.",
-  visualSettings: "Każdy suwak zmienia tylko wskazaną część ekranu głównego. Ustawienia zapisują się lokalnie na tym urządzeniu. 100% to skala bazowa; przywrócenie domyślnych nie zmienia zasad ani danych gry."
+  music: "Domyślna muzyka zmienia się zależnie od etapu i trybu gry. Możesz pozostawić tryb Domyślny albo wymusić jeden z 10 utworów z folderu music. Zmiana wyboru od razu próbuje odtworzyć wskazany utwór.",
+  countdownTick: "Opcjonalne, delikatne piknięcie na ekranie prowadzącego przy 5, 4, 3, 2 i 1 sekundzie. Głośność sygnału ustawiasz niezależnie od muzyki.",
+  visualSettings: "Każdy suwak zmienia tylko wskazaną część ekranu głównego. Panele Teraz, Ostatnia runda i Punkty oraz stoper mają osobne skale. Ustawienia zapisują się lokalnie na tym urządzeniu."
 };
 const PROLOGUE = [
   "Każde Stado gdzieś zmierza.",
@@ -67,7 +68,12 @@ const HOST_STORAGE_KEY = `stado:${pathKey}:host`;
 const PLAYER_STORAGE_KEY = `stado:${pathKey}:player`;
 const AUDIO_STORAGE_KEY = `stado:${pathKey}:audio`;
 const VISUAL_STORAGE_KEY = `stado:${pathKey}:visual`;
-const VISUAL_DEFAULTS={menu:108,players:100,question:100,answers:85,side:100};
+const AUDIO_TRACK_COUNT=10;
+const VISUAL_DEFAULTS={menu:108,players:100,question:100,answers:85,info:115,history:115,points:115,timer:115};
+const VISUAL_RANGES={
+  menu:{min:80,max:125,step:5},players:{min:70,max:145,step:5},question:{min:75,max:140,step:5},answers:{min:65,max:125,step:5},
+  info:{min:75,max:170,step:5},history:{min:75,max:170,step:5},points:{min:75,max:170,step:5},timer:{min:80,max:180,step:5}
+};
 const TAB_STORAGE_KEY = `stado:${pathKey}:hosttab`;
 const LOCK_STORAGE_KEY = `stado:${pathKey}:hostlock`;
 
@@ -122,7 +128,7 @@ const runtime = {
     drafts:{question:"", answer:"", hardcoreType:"open", voteOptionId:"", useToken:false, huntTargetId:"", huntOptionId:""},
     waitingRecovery:false, reconnecting:false, lastAttemptId:null
   },
-  audio: {track:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:""},
+  audio: {track:0, defaultTrack:1, manualTrack:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:"", tickEnabled:true, tickVolume:.18, lastTickKey:"", tickContext:null},
   visual: loadVisualPrefs(),
   data: normalizeQuestionData(rawQuestions),
   quizData: normalizeQuizData(rawQuizQuestions),
@@ -200,9 +206,10 @@ function handleClick(e){
   // Safari/iPadOS may block a later soundtrack switch unless the media element
   // was activated by a user gesture. Retry any blocked track on the next host click.
   if(runtime.role === "host" && runtime.audio.pendingTrack){
-    playMusic(runtime.audio.pendingTrack, true);
+    playMusic(runtime.audio.defaultTrack||runtime.audio.pendingTrack, true);
   }
   const a = el.dataset.action;
+  if(runtime.role === "host" || a === "create-game") unlockTickAudio();
   const id = el.dataset.id;
   const value = el.dataset.value;
   const p = runtime.player;
@@ -368,7 +375,7 @@ function handleClick(e){
   if(a === "skip-hunt"){ playerSubmitHunt(true); return; }
   if(a === "replay-ready"){ playerSendAction("REPLAY_READY",{}); return; }
 
-  if(a === "music-enable"){ testMusicFromSettings(); return; }
+  if(a === "music-play"){ playMusic(currentDefaultMusicTrack(), true); return; }
 }
 
 function handleInput(e){
@@ -400,10 +407,12 @@ function handleInput(e){
     persistPlayer();
   }
   if(t.dataset.hostvolume) setAudioVolume(+t.value/100);
+  if(t.dataset.tickVolume){ setTickVolume(+t.value/100); const out=document.querySelector("[data-tick-volume-value]");if(out)out.textContent=`${Math.round(runtime.audio.tickVolume*100)}%`; }
   if(t.dataset.visualSetting){
     const key=String(t.dataset.visualSetting);
     if(Object.prototype.hasOwnProperty.call(VISUAL_DEFAULTS,key)){
-      runtime.visual[key]=clamp(+t.value,70,140);
+      const range=VISUAL_RANGES[key]||{min:70,max:140};
+      runtime.visual[key]=clamp(+t.value,range.min,range.max);
       const out=document.querySelector(`[data-visual-value="${key}"]`);if(out)out.textContent=`${runtime.visual[key]}%`;
       saveVisualPrefs();applyVisualSettings();applyVisualSettingsToDOM();
       if(runtime.role==="host"){fitHostAnswerText();fitWhichSheepCards();fitHostInfoText();}
@@ -417,6 +426,13 @@ function handleChange(e){
     runtime.configDraft.responseTimeSec = clamp(+t.value,10,120);
     const v=document.querySelector("#responseTimeValue");if(v)v.textContent=formatTimeSetting(runtime.configDraft.responseTimeSec);
     return;
+  }
+  if("musicTrack" in t.dataset){
+    setManualMusicTrack(+t.value);
+    return;
+  }
+  if("tickEnabled" in t.dataset){
+    runtime.audio.tickEnabled=!!t.checked;saveAudioPrefs();unlockTickAudio();return;
   }
   if("tokenToggle" in t.dataset){
     runtime.player.drafts.useToken = !!t.checked;
@@ -1401,6 +1417,7 @@ function hostFinalize(early=false){
   if(m.settledRounds===0){
     m.finalized=true;m.earlyEnded=!!early;r.status="FINAL";
     m.finalResult={noWinner:true,reason:"Gra zakończona przed rozegraniem pierwszej rundy.",rankings:[],podium:[],awards:{herd:[],black:[],quiz:[],allIn:[]}};
+    playMusic(5);
     commitHost("Gra zakończona przed rozpoczęciem");return;
   }
   const aps=classifiedPlayers(r);
@@ -1410,6 +1427,7 @@ function hostFinalize(early=false){
   });
   const result=buildFinalResult(r);
   m.finalized=true;m.earlyEnded=!!early;m.finalResult=result;r.status="FINAL";r.paused=false;
+  playMusic(5);
   commitHost("Finał gry");
 }
 
@@ -1993,7 +2011,7 @@ function renderConfig(room=null){
         <div class="config-label-row timer-label-row"><label class="form-label" for="responseTime">⏱ Limit czasu: <b id="responseTimeValue">${formatTimeSetting(cfg.responseTimeSec??60)}</b></label>${infoTip("timer","Jak działa limit czasu?")}</div>
         <div class="timer-range"><input id="responseTime" type="range" min="10" max="120" step="10" value="${clamp(+(cfg.responseTimeSec??60),10,120)}"><div class="timer-scale"><span>10 s</span><span>1 min</span><span>2 min</span></div></div>
         <h3 class="subhead config-section-title">Jak grubo gramy?</h3>
-        <div class="mode-cards">${Object.entries(MODE).map(([key,m])=>`<div class="mode-card-wrap"><button class="mode-card ${cfg.mode===key?"active":""}" data-action="mode" data-value="${key}"><span class="mode-kicker">${esc(m.short)}</span><b>${modeIcon(key)} ${esc(m.label)}</b></button>${infoTip(key==="warmup"?"modeWarmup":key==="freestyle"?"modeFreestyle":key==="hardcore"?"modeHardcore":"modeQuiz",`Opis trybu ${m.label}`)}</div>`).join("")}</div>
+        <div class="mode-cards">${Object.entries(MODE).map(([key,m])=>`<div class="mode-card-wrap"><button class="mode-card ${cfg.mode===key?"active":""}" data-action="mode" data-value="${key}"><span class="mode-kicker">${esc(m.short)}</span><b>${modeIcon(key)} ${esc(m.label)}</b><small>${esc(m.desc)}</small></button>${infoTip(key==="warmup"?"modeWarmup":key==="freestyle"?"modeFreestyle":key==="hardcore"?"modeHardcore":"modeQuiz",`Opis trybu ${m.label}`)}</div>`).join("")}</div>
         ${cfg.mode==="quiz"?renderQuizConfigControls(cfg):`<div class="config-label-row config-section-title"><h3 class="subhead">Liczba odpowiedzi</h3>${infoTip("answers","Jak dobrać liczbę odpowiedzi?")}</div><div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div>`}
         ${cfg.mode!=="quiz"?`<div class="info-item compact-setting"><div class="spread"><span class="setting-title">🐺 Tryb Wilka ${infoTip("wolf","Jak działa Wilk?")}</span><span class="switch"><input type="checkbox" ${cfg.wolfEnabled?"checked":""} data-action="wolf-toggle"><span></span></span></div></div>`:""}
         <div class="row wrap config-actions"><button class="btn" data-action="create-room">${room?"ZAPISZ I WRÓĆ DO LOBBY":"UTWÓRZ POKÓJ"}</button>${!room?`<button class="btn light" data-action="back-start">Wróć</button>`:""}</div><div class="config-version">${versionHTML()}</div>
@@ -2001,6 +2019,7 @@ function renderConfig(room=null){
       <article class="card pad config-side-card">
         <div class="config-side-title"><h2 class="section-title">${modeIcon(cfg.mode)} ${esc(MODE[cfg.mode].label)}</h2>${infoTip(cfg.mode==="warmup"?"modeWarmup":cfg.mode==="freestyle"?"modeFreestyle":cfg.mode==="hardcore"?"modeHardcore":"modeQuiz","Opis wybranego trybu")}</div>
         <div class="config-label-row config-score-title"><h3 class="subhead">Punktacja</h3>${cfg.mode!=="quiz"?infoTip("questionTypes","Rodzaje pytań i punktacji"):""}</div>
+        ${cfg.mode!=="quiz"?`<div class="question-type-summary"><div><b>🐑 Co robi Stado? / Która Owca?</b><span>Próbujemy przewidzieć odpowiedź, którą wybierze większość.</span></div><div><b>🔎 Co zrobi dana Owca?</b><span>Próbujemy przewidzieć odpowiedź, którą zaznaczy wylosowana Owca.</span></div></div>`:""}
         ${renderConfigScoring(cfg)}
         ${pf.errors.length||pf.warnings.length?`<div class="data-diagnostics">${pf.errors.map(x=>`<div class="error-text">● ${esc(x)}</div>`).join("")}${pf.warnings.map(x=>`<div class="muted">● ${esc(x)}</div>`).join("")}</div>`:""}
       </article>
@@ -2095,7 +2114,8 @@ function renderHostGame(r){
         ${renderHostQuestion(c,r)}
         <div class="answer-area">${renderHostAnswerArea(c,r)}</div>
         <div class="host-bottom-bar">
-          <div class="host-round-bottom"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span>${countdownHTML(c)}${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div>
+          <div class="host-round-bottom"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span>${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div>
+          <div class="host-timer-bottom">${countdownHTML(c)}</div>
           <div class="host-bottom-actions">${renderHostBottomActions(c,r)}</div>
         </div>
       </main>
@@ -2401,8 +2421,20 @@ function renderSettingsModal(){
   if(runtime.role==="player")return `<div class="modal card"><h2>⚙ Ustawienia telefonu</h2><div class="info-list"><div class="info-item">Połączenie: <b>${runtime.player.connected?"online":"offline"}</b></div><div class="info-item">Wersja: <b>${APP_VERSION}</b></div><div class="info-item">Telefon gracza nie odtwarza muzyki ani efektów dźwiękowych.</div></div><div class="modal-actions"><button class="btn secondary" data-action="player-reconnect">Połącz ponownie</button><button class="btn ghost" data-action="player-menu">Wyjdź do menu</button><button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
   const r=runtime.host.room;
   const volume=Math.round(runtime.audio.volume*100);
-  const track=runtime.audio.track||MODE[r?.config?.mode||runtime.configDraft.mode]?.music||1;
-  return `<div class="modal card settings-modal"><h2>⚙ Ustawienia <span class="app-version">v${APP_VERSION}</span></h2><div class="settings-section"><div class="spread"><div class="row"><label class="form-label">Głośność muzyki</label>${infoTip("musicTest","Jak działa test muzyki?")}</div><span class="settings-track-badge">${volume}% • utwór ${track}</span></div><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1"><label class="row settings-mute"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label><div class="row wrap settings-tools"><button class="btn cyan" data-action="music-enable">▶ TEST MUZYKI</button><button class="btn secondary" data-action="open-graphics-settings">🎨 USTAWIENIA GRAFIKI</button>${infoTip("visualSettings","Co można zmienić?")}</div></div>${r?`<div class="info-item settings-room"><b>Pokój ${esc(r.roomCode)}</b><div id="settingsQR" data-qr="${escAttr(joinURL(r))}" class="settings-qr"></div><div class="small center muted">Zeskanuj, aby wrócić do pokoju.</div></div><div class="manage-list">${activePlayers(r).map(p=>`<div class="manage-row">${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))} • ${p.connected||p.isBot?"online":"offline"}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}">Usuń</button></div>`).join("")}</div>`:""}<div class="modal-actions">${r&&["ROUND","PROLOGUE"].includes(r.status)?`<button class="btn secondary" data-action="pause">${r.paused?"Wznów":"Pauza"}</button>`:""}${r&&r.status==="ROUND"&&r.match?.current&&!r.match.current.settlement?`<button class="btn secondary" data-action="abort-round">Pomiń pytanie</button>`:""}${r?`<button class="btn yellow" data-action="settings-new-game">↻ USTAW GRĘ OD NOWA</button>`:""}${r?`<button class="btn danger" data-action="settings-exit-menu">WYJDŹ DO MENU GŁÓWNEGO</button>`:""}<button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
+  const defaultTrack=currentDefaultMusicTrack();
+  const selected=clamp(+(runtime.audio.manualTrack||0),0,AUDIO_TRACK_COUNT);
+  const musicOptions=[`<option value="0" ${selected===0?"selected":""}>Domyślna dla etapu (teraz: utwór ${defaultTrack})</option>`,...Array.from({length:AUDIO_TRACK_COUNT},(_,i)=>i+1).map(n=>`<option value="${n}" ${selected===n?"selected":""}>Utwór ${n}</option>`)].join("");
+  return `<div class="modal card settings-modal"><h2>⚙ Ustawienia <span class="app-version">v${APP_VERSION}</span></h2>
+    <div class="settings-section music-settings-section">
+      <div class="config-label-row"><label class="form-label">🎵 Muzyka</label>${infoTip("music","Jak działa wybór muzyki?")}</div>
+      <div class="music-choice-row"><select class="select" data-music-track>${musicOptions}</select><button class="btn cyan music-play-btn" data-action="music-play">▶ Odtwórz</button></div>
+      <div class="spread"><label class="form-label">Głośność muzyki</label><span class="settings-track-badge">${volume}%</span></div><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1">
+      <label class="row settings-mute"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label>
+      <div class="countdown-sound-settings"><div class="spread"><span class="setting-title">⏱ Piknięcie ostatnich 5 sekund ${infoTip("countdownTick","Jak działa sygnał końcówki?")}</span><span class="switch"><input type="checkbox" data-tick-enabled ${runtime.audio.tickEnabled?"checked":""}><span></span></span></div><div class="spread tick-volume-label"><span>Głośność piknięcia</span><b data-tick-volume-value>${Math.round(runtime.audio.tickVolume*100)}%</b></div><input type="range" min="0" max="100" step="5" value="${Math.round(runtime.audio.tickVolume*100)}" data-tick-volume="1"></div>
+      <div class="row wrap settings-tools"><button class="btn secondary" data-action="open-graphics-settings">🎨 USTAWIENIA GRAFIKI</button>${infoTip("visualSettings","Co można zmienić?")}</div>
+    </div>
+    ${r?`<div class="info-item settings-room"><b>Pokój ${esc(r.roomCode)}</b><div id="settingsQR" data-qr="${escAttr(joinURL(r))}" class="settings-qr"></div><div class="small center muted">Zeskanuj, aby wrócić do pokoju.</div></div><div class="manage-list">${activePlayers(r).map(p=>`<div class="manage-row">${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))} • ${p.connected||p.isBot?"online":"offline"}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}">Usuń</button></div>`).join("")}</div>`:""}
+    <div class="modal-actions">${r&&["ROUND","PROLOGUE"].includes(r.status)?`<button class="btn secondary" data-action="pause">${r.paused?"Wznów":"Pauza"}</button>`:""}${r&&r.status==="ROUND"&&r.match?.current&&!r.match.current.settlement?`<button class="btn secondary" data-action="abort-round">Pomiń pytanie</button>`:""}${r?`<button class="btn yellow" data-action="settings-new-game">↻ USTAW GRĘ OD NOWA</button>`:""}${r?`<button class="btn danger" data-action="settings-exit-menu">WYJDŹ DO MENU GŁÓWNEGO</button>`:""}<button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
 }
 function renderGraphicsSettingsModal(){
   const defs=[
@@ -2410,9 +2442,12 @@ function renderGraphicsSettingsModal(){
     ["players","Owce, imiona i punkty po lewej"],
     ["question","Pytanie w głównym oknie"],
     ["answers","Odpowiedzi i litery"],
-    ["side","Panele po prawej: Teraz / Ostatnia runda / Punkty"]
+    ["info","Panel: Teraz"],
+    ["history","Panel: Ostatnia runda"],
+    ["points","Panel: Punkty"],
+    ["timer","Stoper w trakcie rundy"]
   ];
-  return `<div class="modal card visual-settings-modal"><div class="visual-settings-heading"><h2>🎨 Ustawienia grafiki</h2>${infoTip("visualSettings","Jak działają suwaki grafiki?")}</div><div class="visual-sliders">${defs.map(([key,label])=>`<label class="visual-slider-row"><div><b>${esc(label)}</b><span data-visual-value="${key}">${runtime.visual[key]}%</span></div><input type="range" min="70" max="140" step="5" value="${runtime.visual[key]}" data-visual-setting="${key}"></label>`).join("")}</div><div class="modal-actions"><button class="btn secondary" data-action="visual-reset">Przywróć domyślne</button><button class="btn" data-action="close-modal">GOTOWE</button></div></div>`;
+  return `<div class="modal card visual-settings-modal"><div class="visual-settings-heading"><h2>🎨 Ustawienia grafiki</h2>${infoTip("visualSettings","Jak działają suwaki grafiki?")}</div><div class="visual-sliders">${defs.map(([key,label])=>{const rg=VISUAL_RANGES[key]||{min:70,max:140,step:5};return `<label class="visual-slider-row"><div><b>${esc(label)}</b><span data-visual-value="${key}">${runtime.visual[key]}%</span></div><input type="range" min="${rg.min}" max="${rg.max}" step="${rg.step}" value="${runtime.visual[key]}" data-visual-setting="${key}"></label>`;}).join("")}</div><div class="modal-actions"><button class="btn secondary" data-action="visual-reset">Przywróć domyślne</button><button class="btn" data-action="close-modal">GOTOWE</button></div></div>`;
 }
 function afterModalRender(){document.querySelectorAll("[data-qr]").forEach(renderQRNode);}
 
@@ -2459,7 +2494,7 @@ function fitHostInfoText(){
   const box=panel?.querySelector(".status-lines");
   if(!panel||!box||!panel.clientWidth||!panel.clientHeight)return;
   box.style.fontSize="";
-  const sideScale=(runtime.visual?.side||100)/100;
+  const sideScale=(runtime.visual?.info||100)/100;
   const maxSize=Math.min(24*sideScale,Math.max(14*sideScale,panel.clientWidth*.057*sideScale));
   const minSize=10*sideScale;
   let low=minSize,high=maxSize,best=minSize;
@@ -2499,28 +2534,36 @@ function renderQRNode(el){
 function loadVisualPrefs(){
   const saved=readJSON(VISUAL_STORAGE_KEY)||{};
   const out={...VISUAL_DEFAULTS};
-  Object.keys(out).forEach(k=>{if(Number.isFinite(+saved[k]))out[k]=clamp(+saved[k],70,140);});
+  if(Number.isFinite(+saved.side)){
+    for(const k of ["info","history","points"])if(!Number.isFinite(+saved[k]))saved[k]=+saved.side;
+  }
+  Object.keys(out).forEach(k=>{const rg=VISUAL_RANGES[k]||{min:70,max:140};if(Number.isFinite(+saved[k]))out[k]=clamp(+saved[k],rg.min,rg.max);});
   return out;
 }
 function saveVisualPrefs(){try{localStorage.setItem(VISUAL_STORAGE_KEY,JSON.stringify(runtime.visual));}catch{}}
 function applyVisualSettings(){
   const v=runtime.visual||VISUAL_DEFAULTS,root=document.documentElement;
-  const m=v.menu/100,q=v.question/100,a=v.answers/100,side=v.side/100;
+  const m=v.menu/100,q=v.question/100,a=v.answers/100,info=v.info/100,history=v.history/100,points=v.points/100,timer=v.timer/100;
   root.style.setProperty("--ui-menu-title",`${Math.round(34*m)}px`);
   root.style.setProperty("--ui-menu-subhead",`${Math.round(19*m)}px`);
   root.style.setProperty("--ui-menu-label",`${Math.round(16*m)}px`);
   root.style.setProperty("--ui-menu-mode",`${(15.5*m).toFixed(1)}px`);
   root.style.setProperty("--ui-menu-kicker",`${(11*m).toFixed(1)}px`);
+  root.style.setProperty("--ui-menu-small",`${Math.max(9,Math.round(10.5*m))}px`);
   root.style.setProperty("--ui-question-min",`${Math.round(17*q)}px`);
   root.style.setProperty("--ui-question-max",`${Math.round(31*q)}px`);
-  root.style.setProperty("--ui-answer-min",`${Math.max(10,Math.round(12*a))}px`);
-  root.style.setProperty("--ui-answer-max",`${Math.round(22*a)}px`);
-  root.style.setProperty("--ui-answer-letter-min",`${Math.round(16*a)}px`);
-  root.style.setProperty("--ui-answer-letter-max",`${Math.round(27*a)}px`);
-  root.style.setProperty("--ui-side-title",`${Math.round(21*side)}px`);
-  root.style.setProperty("--ui-side-text",`${Math.round(16*side)}px`);
-  root.style.setProperty("--ui-side-score",`${Math.round(19*side)}px`);
-  root.style.setProperty("--ui-side-small",`${Math.round(12*side)}px`);
+  root.style.setProperty("--ui-answer-min",`${Math.max(9,Math.round(11*a))}px`);
+  root.style.setProperty("--ui-answer-max",`${Math.round(20*a)}px`);
+  root.style.setProperty("--ui-answer-letter-min",`${Math.max(11,Math.round(13*a))}px`);
+  root.style.setProperty("--ui-answer-letter-max",`${Math.round(21*a)}px`);
+  root.style.setProperty("--ui-info-title",`${Math.round(20*info)}px`);
+  root.style.setProperty("--ui-info-text",`${Math.round(15*info)}px`);
+  root.style.setProperty("--ui-history-title",`${Math.round(20*history)}px`);
+  root.style.setProperty("--ui-history-text",`${Math.round(15*history)}px`);
+  root.style.setProperty("--ui-points-title",`${Math.round(20*points)}px`);
+  root.style.setProperty("--ui-points-score",`${Math.round(18*points)}px`);
+  root.style.setProperty("--ui-points-small",`${Math.round(11*points)}px`);
+  root.style.setProperty("--ui-timer-size",`${Math.round(25*timer)}px`);
 }
 function applyVisualSettingsToDOM(){
   const list=document.querySelector(".host-player-list");
@@ -2531,97 +2574,81 @@ function applyVisualSettingsToDOM(){
   }
 }
 
-function loadAudioPrefs(){const a=readJSON(AUDIO_STORAGE_KEY);if(a){runtime.audio.volume=typeof a.volume==="number"?a.volume:.35;runtime.audio.muted=!!a.muted;}syncAudioElements();}
-function syncAudioElements(){for(let i=1;i<=4;i++){const el=document.getElementById(`music${i}`);if(el){el.volume=runtime.audio.muted?0:runtime.audio.volume;}}}
+function loadAudioPrefs(){
+  const a=readJSON(AUDIO_STORAGE_KEY);if(a){
+    runtime.audio.volume=typeof a.volume==="number"?clamp(a.volume,0,1):.35;
+    runtime.audio.muted=!!a.muted;
+    runtime.audio.manualTrack=clamp(+(a.manualTrack||0),0,AUDIO_TRACK_COUNT);
+    runtime.audio.tickEnabled=a.tickEnabled!==false;
+    runtime.audio.tickVolume=typeof a.tickVolume==="number"?clamp(a.tickVolume,0,1):.18;
+  }
+  syncAudioElements();
+}
+function syncAudioElements(){for(let i=1;i<=AUDIO_TRACK_COUNT;i++){const el=document.getElementById(`music${i}`);if(el){el.volume=runtime.audio.muted?0:runtime.audio.volume;}}}
 function setAudioVolume(v){runtime.audio.volume=clamp(v,0,1);syncAudioElements();saveAudioPrefs();}
+function setTickVolume(v){runtime.audio.tickVolume=clamp(v,0,1);saveAudioPrefs();}
 function setMuted(v){runtime.audio.muted=!!v;syncAudioElements();saveAudioPrefs();render();}
-function saveAudioPrefs(){try{localStorage.setItem(AUDIO_STORAGE_KEY,JSON.stringify({volume:runtime.audio.volume,muted:runtime.audio.muted}));}catch{}}
-
+function saveAudioPrefs(){try{localStorage.setItem(AUDIO_STORAGE_KEY,JSON.stringify({volume:runtime.audio.volume,muted:runtime.audio.muted,manualTrack:runtime.audio.manualTrack,tickEnabled:runtime.audio.tickEnabled,tickVolume:runtime.audio.tickVolume}));}catch{}}
+function currentDefaultMusicTrack(){
+  const r=runtime.host.room;
+  if(r?.status==="PROLOGUE")return 1;
+  if(r?.status==="FINAL")return 5;
+  if(r?.status==="ROUND")return MODE[r.config.mode]?.music||2;
+  return runtime.audio.defaultTrack||1;
+}
+function resolveMusicTrack(defaultTrack){const manual=clamp(+(runtime.audio.manualTrack||0),0,AUDIO_TRACK_COUNT);return manual||clamp(+defaultTrack,1,AUDIO_TRACK_COUNT);}
+function setManualMusicTrack(n){
+  runtime.audio.manualTrack=clamp(+n,0,AUDIO_TRACK_COUNT);saveAudioPrefs();
+  if(runtime.role!=="host")return;
+  runtime.audio.muted=false;saveAudioPrefs();syncAudioElements();
+  playMusic(currentDefaultMusicTrack(),true);
+}
 function primeMusicTrack(n){
   if(runtime.role==="player")return;
+  n=resolveMusicTrack(n);
   const el=document.getElementById(`music${n}`);
   if(!el || !el.paused || runtime.audio.track===n)return;
   const oldVolume=el.volume, oldMuted=el.muted;
   try{
-    el.muted=false;
-    el.volume=0;
-    const p=el.play();
-    if(p&&typeof p.then==="function"){
-      p.then(()=>{
-        el.pause();
-        try{el.currentTime=0;}catch{}
-        el.muted=oldMuted;
-        el.volume=runtime.audio.muted?0:runtime.audio.volume;
-      }).catch(()=>{
-        el.muted=oldMuted;
-        el.volume=oldVolume;
-      });
-    }else{
-      el.pause();
-      try{el.currentTime=0;}catch{}
-      el.muted=oldMuted;
-      el.volume=runtime.audio.muted?0:runtime.audio.volume;
-    }
-  }catch{
-    el.muted=oldMuted;
-    el.volume=oldVolume;
-  }
+    el.muted=false;el.volume=0;
+    const pr=el.play();
+    if(pr&&typeof pr.then==="function")pr.then(()=>{el.pause();try{el.currentTime=0;}catch{}el.muted=oldMuted;el.volume=runtime.audio.muted?0:runtime.audio.volume;}).catch(()=>{el.muted=oldMuted;el.volume=oldVolume;});
+    else{el.pause();try{el.currentTime=0;}catch{}el.muted=oldMuted;el.volume=runtime.audio.muted?0:runtime.audio.volume;}
+  }catch{el.muted=oldMuted;el.volume=oldVolume;}
 }
-
-async function testMusicFromSettings(){
+function playMusic(defaultTrack,force=false){
   if(runtime.role==="player")return;
-  const r=runtime.host.room;
-  const n=runtime.audio.track||MODE[r?.config?.mode||runtime.configDraft.mode]?.music||1;
-  runtime.audio.muted=false;
-  if(runtime.audio.volume<.15)runtime.audio.volume=.35;
-  syncAudioElements();saveAudioPrefs();
-  for(let i=1;i<=4;i++){const other=document.getElementById(`music${i}`);if(other&&i!==n){other.pause();try{other.currentTime=0;}catch{}}}
-  const el=document.getElementById(`music${n}`);
-  if(!el){toast("Nie znaleziono pliku muzyki dla tego trybu.","error");return;}
-  try{
-    el.loop=true;el.muted=false;el.volume=runtime.audio.volume;try{el.currentTime=0;}catch{}
-    await el.play();
-    runtime.audio.track=n;runtime.audio.pendingTrack=0;runtime.audio.lastError="";
-    toast(`Muzyka działa — utwór ${n}.`);
-    render();
-  }catch(err){
-    runtime.audio.pendingTrack=n;runtime.audio.lastError=String(err?.name||err?.message||"audio");
-    toast("Przeglądarka nadal blokuje dźwięk. Sprawdź głośność urządzenia i tryb cichy.","error");
-  }
-}
-
-function playMusic(n,force=false){
-  if(runtime.role==="player")return;
-  runtime.audio.track=n;
-  syncAudioElements();
-  for(let i=1;i<=4;i++){
-    const el=document.getElementById(`music${i}`);
-    if(!el)continue;
-    if(i!==n){
-      el.pause();
-      try{el.currentTime=0;}catch{}
-    }
-  }
-  const el=document.getElementById(`music${n}`);
-  if(!el)return;
-  el.loop=true;
-  el.muted=false;
-  el.volume=runtime.audio.muted?0:runtime.audio.volume;
+  runtime.audio.defaultTrack=clamp(+defaultTrack,1,AUDIO_TRACK_COUNT);
+  const n=resolveMusicTrack(runtime.audio.defaultTrack);
+  runtime.audio.track=n;syncAudioElements();
+  for(let i=1;i<=AUDIO_TRACK_COUNT;i++){const el=document.getElementById(`music${i}`);if(!el)continue;if(i!==n){el.pause();try{el.currentTime=0;}catch{}}}
+  const el=document.getElementById(`music${n}`);if(!el)return;
+  el.loop=true;el.muted=false;el.volume=runtime.audio.muted?0:runtime.audio.volume;
   if(!el.paused&&!force){runtime.audio.pendingTrack=0;return;}
   const promise=el.play();
-  if(promise&&typeof promise.then==="function"){
-    promise.then(()=>{
-      runtime.audio.pendingTrack=0;
-      runtime.audio.lastError="";
-    }).catch(err=>{
-      runtime.audio.pendingTrack=n;
-      runtime.audio.lastError=String(err?.name||err?.message||"audio");
-      if(force)toast("Muzyka została zablokowana przez przeglądarkę. Kliknij „Włącz / testuj muzykę” w Ustawieniach.","error");
-    });
-  }
+  if(promise&&typeof promise.then==="function")promise.then(()=>{runtime.audio.pendingTrack=0;runtime.audio.lastError="";}).catch(err=>{
+    runtime.audio.pendingTrack=n;runtime.audio.lastError=String(err?.name||err?.message||"audio");
+    if(force)toast(`Nie udało się odtworzyć utworu ${n}. Sprawdź, czy music/music${n}.mp3 istnieje i czy dźwięk urządzenia jest włączony.`,"error");
+  });
 }
 function pauseCurrentMusic(){const el=document.getElementById(`music${runtime.audio.track}`);if(el)el.pause();}
-function pauseAllMusic(){for(let i=1;i<=4;i++){const el=document.getElementById(`music${i}`);if(el){el.pause();try{el.currentTime=0;}catch{}}}runtime.audio.track=0;runtime.audio.pendingTrack=0;}
+function pauseAllMusic(){for(let i=1;i<=AUDIO_TRACK_COUNT;i++){const el=document.getElementById(`music${i}`);if(el){el.pause();try{el.currentTime=0;}catch{}}}runtime.audio.track=0;runtime.audio.pendingTrack=0;}
+function unlockTickAudio(){
+  if(typeof window==="undefined")return null;
+  const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;
+  try{if(!runtime.audio.tickContext)runtime.audio.tickContext=new AC();if(runtime.audio.tickContext.state==="suspended")runtime.audio.tickContext.resume().catch(()=>{});return runtime.audio.tickContext;}catch{return null;}
+}
+function playCountdownTick(left){
+  if(runtime.role!=="host"||!runtime.audio.tickEnabled||runtime.audio.tickVolume<=0||left<1||left>5)return;
+  const ctx=unlockTickAudio();if(!ctx||ctx.state!=="running")return;
+  try{
+    const osc=ctx.createOscillator(),gain=ctx.createGain(),now=ctx.currentTime;
+    osc.type="sine";osc.frequency.setValueAtTime(left===1?920:720,now);
+    const amp=Math.max(.002,.065*runtime.audio.tickVolume);
+    gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(amp,now+.008);gain.gain.exponentialRampToValueAtTime(.0001,now+.07);
+    osc.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.075);
+  }catch{}
+}
 async function requestWakeLock(){if(runtime.role!=="host"||!runtime.host.room||runtime.host.wakeLock||!navigator.wakeLock?.request)return;try{runtime.host.wakeLock=await navigator.wakeLock.request("screen");runtime.host.wakeLock.addEventListener("release",()=>runtime.host.wakeLock=null);}catch{}}
 function releaseWakeLock(){try{runtime.host.wakeLock?.release();}catch{}runtime.host.wakeLock=null;}
 
@@ -2633,15 +2660,18 @@ function formatTimeSetting(sec){sec=clamp(+sec,10,120);return sec<60?`${sec} s`:
 function countdownHTML(c,compact=false){
   if(!c?.phaseDeadlineAt||!isTimedPhase(c.phase))return "";
   const left=Math.max(0,Math.ceil((c.phaseDeadlineAt-Date.now())/1000));
-  return `<span class="countdown ${compact?"compact":""} ${left<=10?"urgent":""}" data-deadline="${c.phaseDeadlineAt}">⏱ <b data-countdown-text>${formatCountdownSeconds(left)}</b></span>`;
+  return `<span class="countdown ${compact?"compact":""} ${left>0&&left<=10?"urgent":""} ${left>0&&left<=5?"critical":""}" data-deadline="${c.phaseDeadlineAt}">⏱ <b data-countdown-text>${formatCountdownSeconds(left)}</b></span>`;
 }
 function formatCountdownSeconds(sec){sec=Math.max(0,Math.ceil(+sec||0));return `${Math.floor(sec/60)}:${String(sec%60).padStart(2,"0")}`;}
 function updateCountdownNodes(){
-  const now=Date.now();document.querySelectorAll("[data-deadline]").forEach(el=>{
+  const now=Date.now();let hostTick=null;
+  document.querySelectorAll("[data-deadline]").forEach(el=>{
     const deadline=+el.dataset.deadline||0,left=Math.max(0,Math.ceil((deadline-now)/1000));
     const text=el.querySelector("[data-countdown-text]");if(text)text.textContent=formatCountdownSeconds(left);
-    el.classList.toggle("urgent",left<=10);
+    el.classList.toggle("urgent",left>0&&left<=10);el.classList.toggle("critical",left>0&&left<=5);
+    if(runtime.role==="host"&&el.closest(".host-timer-bottom")&&left>0&&left<=5)hostTick={deadline,left};
   });
+  if(hostTick){const key=`${hostTick.deadline}:${hostTick.left}`;if(runtime.audio.lastTickKey!==key){runtime.audio.lastTickKey=key;playCountdownTick(hostTick.left);}}
 }
 
 function setPlayerJoinURL(identity){try{const u=new URL(location.href);u.search="";u.hash="";u.searchParams.set("room",identity.roomCode);u.searchParams.set("roomId",identity.roomId);history.replaceState(null,"",u.pathname+u.search);}catch{}}

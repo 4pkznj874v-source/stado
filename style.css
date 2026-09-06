@@ -784,3 +784,141 @@ body.host-game{overflow:hidden}
 .settings-track-badge{font-size:.82rem;font-weight:900;color:var(--yellow);white-space:nowrap}
 .visual-settings-heading{display:flex;align-items:center;gap:10px}.visual-settings-heading h2{margin:0}
 .settings-tools>.info-tip{color:#7de0ef}
+
+/* v1.1.8 — osobne skale paneli, większy stoper i rozbudowane audio */
+:root{
+  --ui-menu-small:11px;
+  --ui-info-title:23px;
+  --ui-info-text:17px;
+  --ui-history-title:23px;
+  --ui-history-text:17px;
+  --ui-points-title:23px;
+  --ui-points-score:21px;
+  --ui-points-small:13px;
+  --ui-timer-size:29px;
+}
+
+/* Krótki opis trybu zostaje w kafelku, pełne wyjaśnienie jest pod i. */
+.config-shell .mode-card small{
+  display:-webkit-box;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
+  overflow:hidden;
+  margin-top:5px;
+  min-height:2.25em;
+  font-size:var(--ui-menu-small);
+  line-height:1.12;
+  font-weight:700;
+  color:#69637d;
+}
+.config-shell .mode-card-wrap .mode-card{min-height:94px;padding:9px 8px 10px}
+.config-shell .mode-card-wrap>.info-tip{right:7px;bottom:7px}
+
+/* Menu nie może się wzajemnie przykrywać nawet przy maksymalnej skali. */
+.config-shell .config-grid{align-items:start}
+.config-shell .config-card-main,.config-shell .config-side-card{min-width:0}
+.config-shell .mode-cards{gap:8px}
+.config-shell .config-section-title{margin-top:12px!important}
+.config-shell .compact-setting{margin-top:10px;padding:8px 11px}
+.config-shell .config-actions{margin-top:11px!important}
+.config-shell .timer-label-row{margin-top:9px}
+.config-shell .question-type-summary{display:grid;gap:6px;margin:2px 0 8px}
+.config-shell .question-type-summary>div{display:grid;gap:2px;padding:7px 9px;border-radius:11px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08)}
+.config-shell .question-type-summary b{font-size:clamp(11px,var(--ui-menu-label),15px)}
+.config-shell .question-type-summary span{font-size:clamp(10px,var(--ui-menu-small),13px);line-height:1.18;color:#d4d7e8}
+.card.light .question-type-summary>div{background:rgba(58,42,86,.055);border-color:rgba(58,42,86,.1)}
+.card.light .question-type-summary span{color:#69637d}
+
+/* Odpowiedzi — litery mniejsze niż wcześniej. */
+.answer-letter{font-size:clamp(var(--ui-answer-letter-min),1.25vw,var(--ui-answer-letter-max))}
+.answer-text{font-size:clamp(var(--ui-answer-min),1.08vw,var(--ui-answer-max));line-height:1.12}
+
+/* Prawa kolumna: Ostatnia runda dostaje więcej miejsca, Punkty mniej. */
+.host-right{grid-template-rows:minmax(150px,1.15fr) minmax(145px,1.07fr) minmax(105px,.78fr)}
+.host-info-panel h3{font-size:var(--ui-info-title)!important}
+.host-info-panel .status-lines{font-size:var(--ui-info-text)}
+.host-history-panel h3{font-size:var(--ui-history-title)!important}
+.host-history-panel .history-list,.host-history-panel .history-empty{font-size:var(--ui-history-text)!important}
+.host-score-panel h3{font-size:var(--ui-points-title)!important}
+.host-score-panel .score-rules-simple .score-rule b{font-size:var(--ui-points-score)!important}
+.host-score-panel .score-rules-simple .score-rule span{font-size:var(--ui-points-small)!important}
+.host-score-panel .score-rules-simple .score-rule{min-height:46px;padding:6px 7px}
+
+/* Dolny pasek: runda po lewej, duży stoper dokładnie pośrodku, akcja po prawej. */
+.host-bottom-bar{
+  min-height:54px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  align-items:center;
+  gap:12px;
+  padding:3px 2px 0;
+}
+.host-round-bottom{justify-content:flex-start;min-width:0}
+.host-round-bottom .pill{
+  min-height:48px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:10px 17px;
+  font-size:clamp(15px,1.18vw,19px);
+  font-weight:1000;
+}
+.host-timer-bottom{display:flex;align-items:center;justify-content:center;min-width:120px}
+.host-timer-bottom:empty{min-width:0}
+.host-timer-bottom .countdown{
+  min-width:122px;
+  min-height:50px;
+  justify-content:center;
+  padding:8px 17px;
+  font-size:var(--ui-timer-size);
+  line-height:1;
+  border-width:2px;
+  box-shadow:0 7px 20px rgba(0,0,0,.14);
+}
+.host-bottom-actions{justify-content:flex-end;justify-self:end;min-width:0}
+.host-bottom-actions .btn{min-height:48px;font-size:clamp(14px,1.05vw,18px);padding:10px 18px}
+
+/* Ostatnie 10 sekund — czerwony, czytelny i migający stoper. */
+.countdown.urgent{
+  background:rgba(214,43,70,.88)!important;
+  border-color:#ff9bab!important;
+  color:#fff!important;
+  box-shadow:0 0 0 2px rgba(255,96,120,.18),0 0 22px rgba(255,56,86,.5)!important;
+  animation:timerUrgentBlink .72s ease-in-out infinite alternate!important;
+}
+.countdown.critical{animation-duration:.46s!important}
+@keyframes timerUrgentBlink{from{filter:brightness(.9);transform:scale(1)}to{filter:brightness(1.22);transform:scale(1.035)}}
+
+/* Ustawienia grafiki — 8 suwaków w dwóch kolumnach na większym ekranie. */
+.visual-settings-modal{width:min(820px,96vw)}
+.visual-sliders{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px;margin-top:12px}
+.visual-slider-row{gap:6px;padding:8px 10px}
+.visual-slider-row b{font-size:.9rem;line-height:1.15}
+.visual-slider-row span{font-size:.88rem}
+
+/* Ustawienia muzyki i sygnału końcówki. */
+.music-settings-section{gap:10px}
+.music-choice-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:center}
+.music-choice-row .select{min-width:0}
+.music-play-btn{min-height:44px;padding:9px 14px;box-shadow:none}
+.countdown-sound-settings{display:grid;gap:7px;margin-top:2px;padding:10px 11px;border-radius:12px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08)}
+.tick-volume-label{font-size:.82rem;color:var(--muted)}
+.tick-volume-label b{color:var(--yellow)}
+
+@media(max-height:760px) and (orientation:landscape){
+  .config-shell .mode-card-wrap .mode-card{min-height:82px;padding:6px 6px 7px}
+  .config-shell .mode-card small{font-size:max(8px,calc(var(--ui-menu-small) * .88));min-height:2.05em;margin-top:3px}
+  .config-shell .config-section-title{margin-top:8px!important}
+  .config-shell .question-type-summary{gap:4px;margin-bottom:5px}
+  .config-shell .question-type-summary>div{padding:5px 7px}
+  .host-right{grid-template-rows:minmax(120px,1.08fr) minmax(120px,1fr) minmax(88px,.72fr)}
+  .host-bottom-bar{min-height:48px;gap:8px}
+  .host-round-bottom .pill,.host-bottom-actions .btn{min-height:44px;padding:7px 12px}
+  .host-timer-bottom .countdown{min-height:44px;min-width:108px;padding:6px 12px}
+  .visual-sliders{gap:8px}
+  .visual-slider-row{padding:7px 9px}
+}
+@media(max-width:760px){
+  .visual-sliders{grid-template-columns:1fr}
+  .music-choice-row{grid-template-columns:1fr}
+}
