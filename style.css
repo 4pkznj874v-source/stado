@@ -592,3 +592,107 @@ body.host-game{overflow:hidden}
   .host-bottom-bar{min-height:44px;gap:8px}
   .host-round-bottom .pill,.host-round-bottom .badge{padding:6px 9px;font-size:clamp(11px,.9vw,14px)}
 }
+
+/* v1.1.6 — kompaktowa konfiguracja, dwa modele punktacji i czytelniejszy ranking */
+.config-shell{
+  height:100dvh;
+  min-height:0;
+  overflow:hidden;
+  padding:10px 16px;
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr);
+  gap:8px;
+}
+.config-shell>.topbar{margin-bottom:0;min-height:48px}
+.config-shell>.sheep-runway{display:none}
+.config-shell .config-grid{height:100%;min-height:0;align-items:stretch;gap:12px;max-width:1460px;width:100%}
+.config-shell .card.pad{padding:14px 16px}
+.config-card-main,.config-side-card{height:100%;min-height:0;overflow:hidden}
+.config-card-main{display:flex;flex-direction:column}
+.config-side-card{display:flex;flex-direction:column}
+.config-shell .section-title{font-size:clamp(25px,2.2vw,36px);margin-bottom:6px}
+.config-shell .subhead{font-size:clamp(15px,1.25vw,19px)}
+.config-shell .form-label{font-size:clamp(13px,1vw,16px);margin-bottom:3px}
+.config-shell .range-row{gap:8px}
+.config-shell input[type=range]{height:22px}
+.timer-label-row{margin-top:7px!important}
+.timer-range{display:grid;gap:0}
+.timer-scale{display:flex;justify-content:space-between;font-size:.72rem;color:#6b657b;font-weight:800;margin-top:-1px;padding:0 2px}
+.config-shell .config-section-title{margin-top:8px!important}
+.config-shell .mode-cards{gap:7px}
+.config-shell .mode-card{padding:8px 7px;border-radius:14px;min-height:84px}
+.config-shell .mode-kicker{font-size:.66rem;margin-bottom:3px}
+.config-shell .mode-card b{font-size:.92rem}
+.config-shell .mode-card small{font-size:.70rem;line-height:1.15;margin-top:3px}
+.config-shell .choice{padding:8px 12px;border-radius:12px}
+.config-shell .choice-row{gap:7px}
+.config-shell .quiz-config-block{gap:6px;margin-top:8px}
+.config-shell .quiz-difficulty-row .choice{padding:8px 8px}
+.config-shell .category-launch{padding:8px 11px;min-height:42px}
+.config-shell .compact-setting{margin-top:7px;padding:7px 10px}
+.config-shell .config-actions{margin-top:auto!important;padding-top:8px}
+.config-shell .config-actions .btn{min-height:42px;padding:10px 16px}
+.config-shell .config-version{margin-top:5px;font-size:.72rem}
+.mode-desc{font-size:clamp(12px,.92vw,15px);line-height:1.28;margin:0 0 8px;color:#e6e6f3}
+.config-score-title{margin:0 0 6px!important}
+.config-score-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;min-height:0}
+.config-score-groups.one{grid-template-columns:1fr}
+.config-score-group{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.11);border-radius:13px;padding:8px 9px;display:grid;gap:4px;align-content:start}
+.config-score-group.accent{border-color:rgba(57,198,233,.28);background:rgba(57,198,233,.075)}
+.config-score-group h4{margin:0 0 2px;font-size:clamp(13px,1vw,16px)}
+.config-score-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:start;font-size:clamp(11px,.8vw,13px);line-height:1.18}
+.config-score-row b{white-space:nowrap;color:#fff}
+.config-score-row span{color:#d8dbea}
+.config-score-note{font-size:clamp(10px,.72vw,12px);line-height:1.2;color:#c7dbe6;margin-top:2px}
+.config-shell .data-diagnostics{max-height:80px;padding:7px;margin-top:6px;font-size:.72rem}
+
+/* Odpowiedzi wracają do spokojniejszej skali; JS dopasowuje je w ramach tego limitu. */
+.answer-text{font-size:clamp(14px,1.25vw,22px);line-height:1.10;font-weight:900}
+.answer-letter{font-size:clamp(22px,2.1vw,34px)}
+
+/* Ranking: przy małej liczbie graczy wykorzystujemy miejsce na pełne nazwy zamiast wielkich pustych pól. */
+.host-player .pn,.host-player .pt{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+.host-player .pn{line-height:1.02}
+.host-player .pt{line-height:1.08}
+.host-player.long-name .pn{font-size:calc(var(--host-name,15px) * .88)}
+.host-player.long-name .pt{font-size:calc(var(--host-type,10px) * .92)}
+.host-player.very-long .pn{font-size:calc(var(--host-name,15px) * .78)}
+.host-player.very-long .pt{font-size:calc(var(--host-type,10px) * .84)}
+.host-player-list.few-players .host-player{
+  grid-template-columns:var(--host-avatar,108px) minmax(0,1fr);
+  grid-template-areas:"avatar copy" "avatar res";
+  grid-template-rows:minmax(0,1fr) auto;
+  align-content:center;
+  column-gap:12px;
+  row-gap:8px;
+  padding:10px 12px;
+}
+.host-player-list.few-players .host-player>img{grid-area:avatar;align-self:center;justify-self:center;max-width:120px;max-height:120px}
+.host-player-list.few-players .host-player-copy{grid-area:copy;align-self:end}
+.host-player-list.few-players .host-player .res{grid-area:res;display:flex;justify-content:flex-start;gap:14px;align-self:start}
+.host-player-list.few-players .resource{justify-content:flex-start}
+.host-player-list.few-players .host-player .pn{font-size:var(--host-name,20px)}
+.host-player-list.few-players .host-player.long-name .pn{font-size:calc(var(--host-name,20px) * .88)}
+.host-player-list.few-players .host-player.very-long .pn{font-size:calc(var(--host-name,20px) * .78)}
+.host-player-list.few-players .host-player .pt{font-size:var(--host-type,14px)}
+.host-player-list.few-players .host-player .res{font-size:var(--host-score,20px)}
+
+.which-role-note{margin:0 0 10px;padding:10px 12px;border-radius:14px;background:rgba(57,198,233,.10);border:1px solid rgba(57,198,233,.28);line-height:1.3}
+.which-role-note.judge{background:rgba(255,200,61,.11);border-color:rgba(255,200,61,.34)}
+.which-correct-label{margin-top:4px;padding:3px 7px;border-radius:999px;background:rgba(255,255,255,.9);color:#244e40;font-size:clamp(8px,.7vw,11px);font-weight:1000;letter-spacing:.03em}
+
+@media(max-height:760px) and (orientation:landscape){
+  .config-shell{padding:7px 12px;gap:5px}
+  .config-shell>.topbar{min-height:42px}
+  .config-shell .logo{font-size:clamp(28px,3vw,42px)}
+  .config-shell .card.pad{padding:10px 12px}
+  .config-shell .section-title{font-size:clamp(22px,2vw,31px);margin-bottom:4px}
+  .config-shell .mode-card{min-height:74px;padding:6px}
+  .config-shell .mode-card small{font-size:.64rem}
+  .config-score-group{padding:6px 7px;gap:3px}
+  .config-score-row{font-size:clamp(10px,.72vw,12px)}
+  .config-score-note{font-size:10px}
+  .mode-desc{font-size:clamp(11px,.78vw,13px);margin-bottom:5px}
+  .config-shell .config-actions{padding-top:5px}
+  .config-shell .config-actions .btn{min-height:38px;padding:8px 13px}
+}
