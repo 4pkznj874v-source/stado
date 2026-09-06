@@ -696,3 +696,91 @@ body.host-game{overflow:hidden}
   .config-shell .config-actions{padding-top:5px}
   .config-shell .config-actions .btn{min-height:38px;padding:8px 13px}
 }
+
+/* v1.1.7 — regulowana typografia/UI + czytelniejsze menu */
+:root{
+  --ui-menu-title:37px;
+  --ui-menu-subhead:21px;
+  --ui-menu-label:17px;
+  --ui-menu-mode:17px;
+  --ui-menu-kicker:12px;
+  --ui-question-min:17px;
+  --ui-question-max:31px;
+  --ui-answer-min:10px;
+  --ui-answer-max:19px;
+  --ui-answer-letter-min:14px;
+  --ui-answer-letter-max:23px;
+  --ui-side-title:21px;
+  --ui-side-text:16px;
+  --ui-side-score:19px;
+}
+
+/* Menu ma być większe, ale nadal mieścić się bez przewijania na iPadzie/laptopie. */
+.config-shell .section-title{font-size:clamp(25px,var(--ui-menu-title),42px)}
+.config-shell .subhead{font-size:clamp(15px,var(--ui-menu-subhead),24px)}
+.config-shell .form-label{font-size:clamp(13px,var(--ui-menu-label),20px)}
+.config-shell .mode-kicker{font-size:var(--ui-menu-kicker);margin-bottom:4px}
+.config-shell .mode-card b{font-size:var(--ui-menu-mode)}
+.config-shell .mode-card small{display:none}
+.mode-cards{align-items:stretch}
+.mode-card-wrap{position:relative;min-width:0}
+.mode-card-wrap .mode-card{width:100%;height:100%;min-height:76px;padding:10px 8px 9px}
+.mode-card-wrap>.info-tip{position:absolute;right:7px;bottom:7px;width:21px;height:21px;min-width:21px;font-size:.72rem;z-index:5}
+.config-side-title{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.config-side-title .section-title{margin:0}
+.config-score-title{margin-top:5px!important;margin-bottom:5px!important}
+.config-score-group h4{font-size:clamp(13px,var(--ui-menu-subhead),18px)}
+.config-score-row{font-size:clamp(11px,var(--ui-menu-label),15px);line-height:1.16}
+.config-score-groups{gap:8px}
+.config-score-group{padding:8px 10px;gap:4px}
+.config-shell .compact-setting{font-size:var(--ui-menu-label)}
+.config-shell .choice{font-size:var(--ui-menu-label)}
+.category-launch{font-size:var(--ui-menu-label)}
+
+/* Pytanie, odpowiedzi i litery są niezależnie regulowane. */
+.question-card{font-size:clamp(var(--ui-question-min),1.8vw,var(--ui-question-max))}
+.answer-text{font-size:clamp(var(--ui-answer-min),1.15vw,var(--ui-answer-max));line-height:1.12}
+.answer-letter{font-size:clamp(var(--ui-answer-letter-min),1.55vw,var(--ui-answer-letter-max));line-height:1}
+
+/* Prawa kolumna ma własną skalę. */
+.host-right .host-panel h3{font-size:var(--ui-side-title)}
+.host-history-panel .history-list,.host-history-panel .history-empty{font-size:var(--ui-side-text)}
+.host-history-panel .history-q,.host-history-panel .history-result{font-size:1em}
+.score-rules-simple .score-rule b{font-size:var(--ui-side-score)}
+.score-rules-simple .score-rule span{font-size:clamp(9px,var(--ui-side-small,12px),15px)}
+
+/* Ranking — pozwalamy wykorzystać przestrzeń przy 2–4 osobach i nie ucinamy pełnych nazw. */
+.host-player img{max-width:150px;max-height:150px}
+.host-player-list.few-players .host-player>img{max-width:150px;max-height:150px}
+.host-player .pn,.host-player .pt{overflow-wrap:break-word;word-break:normal}
+.host-player.long-name .pn{font-size:calc(var(--host-name,15px) * .90)}
+.host-player.very-long .pn{font-size:calc(var(--host-name,15px) * .80)}
+.host-player.long-name .pt{font-size:calc(var(--host-type,10px) * .92)}
+.host-player.very-long .pt{font-size:calc(var(--host-type,10px) * .82)}
+
+/* Ustawienia grafiki */
+.visual-settings-modal{width:min(720px,96vw)}
+.visual-sliders{display:grid;gap:14px;margin-top:16px}
+.visual-slider-row{display:grid;gap:7px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.1)}
+.visual-slider-row>div{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.visual-slider-row span{font-weight:950;color:var(--yellow);white-space:nowrap}
+.visual-slider-row input[type=range]{width:100%}
+.settings-section{display:grid;gap:9px;padding:12px;border-radius:14px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08)}
+.settings-mute{margin:0!important}
+.settings-tools{margin-top:2px}
+.settings-room{margin-top:12px}
+.settings-qr{width:132px;height:132px;background:#fff;padding:8px;border-radius:12px;margin:8px auto}
+
+/* Nazwa roli w nowej mechanice */
+.which-role-note.judge{background:rgba(255,200,61,.12);border-color:rgba(255,200,61,.38)}
+
+@media(max-height:760px) and (orientation:landscape){
+  .config-shell .mode-card-wrap .mode-card{min-height:67px;padding:7px 6px}
+  .config-shell .card.pad{padding:9px 11px}
+  .config-score-group{padding:6px 8px}
+  .config-score-row{font-size:clamp(10px,var(--ui-menu-label),13px)}
+  .config-shell .config-actions{padding-top:4px}
+}
+.settings-track-badge{font-size:.82rem;font-weight:900;color:var(--yellow);white-space:nowrap}
+.visual-settings-heading{display:flex;align-items:center;gap:10px}.visual-settings-heading h2{margin:0}
+.settings-tools>.info-tip{color:#7de0ef}
