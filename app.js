@@ -1,8 +1,8 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.1.9";
-const PROTOCOL_VERSION = "stado-v1";
+const APP_VERSION = "1.3.1";
+const PROTOCOL_VERSION = "stado-v2";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
 const MIN_PLAYERS = 3;
@@ -43,16 +43,16 @@ const CONFIG_HELP = {
   timer: "Każda faza gry dostaje własny pełny limit czasu od 10 do 120 sekund. Jeśli gracz nie odda głosu w czasie, w tej rundzie dostaje 0 pkt. W fazie pisania po upływie czasu brakująca odpowiedź nie trafia do głosowania.",
   answers: "Rekomendacja: 3–4 Owce → 3 odpowiedzi, 5–8 → 4, 9–12 → 5. Jeżeli graczy jest mniej niż wybrana liczba odpowiedzi, gra automatycznie ogranicza liczbę odpowiedzi do liczby aktywnych Owiec.",
   wolf: "Wilk to opcjonalna tajna minigra po oddaniu głosu w zwykłych rundach. Nie występuje w Quizie ani w rundach „Co zrobi dana Owca?”. Trafienie daje +1 Wilkowi i może odebrać do 2 pkt celowi; pudło kosztuje Wilka 1 pkt; rezygnacja = 0.",
-  quiz: "Quiz ma zawsze 5 odpowiedzi i dokładnie jedną poprawną. Minimum 2 graczy. Nie ma Czarnej Owcy, Barana ani pisania odpowiedzi. Każdy zaczyna z 2 Żetonami Wełny.",
-  quizCategories: "Domyślnie aktywne są wszystkie 10 kategorii. Możesz zostawić pełny miks albo wybrać dowolny zestaw kategorii. Gra losuje wyłącznie pytania pasujące jednocześnie do wybranego poziomu i kategorii.",
+  quiz: "Quiz ma zawsze 5 odpowiedzi i dokładnie jedną poprawną. Minimum 2 graczy. Przed pierwszym blokiem oraz po każdych 5 pytaniach Stado głosuje na kategorię kolejnych pytań, jeśli w ustawieniach wybrano co najmniej 2 kategorie. Każdy zaczyna z 1 Żetonem Wełny: można użyć go do punktacji ×2, dać +10 dodatkowych głosów przy wyborze kategorii albo zachować na finał za +1 pkt.",
+  quizCategories: "Domyślnie aktywne są wszystkie 10 kategorii. Przed blokiem pytań gra losuje maksymalnie 4 z wcześniej zaznaczonych kategorii i gracze wybierają jedną. Przy 2–4 zaznaczonych kategoriach do głosowania trafiają wszystkie. Jeśli zaznaczona jest tylko 1 kategoria, głosowanie jest pomijane.",
   modeWarmup: "Rozgrzewka: gra daje pytania i gotowe odpowiedzi. Najszybszy wariant bez pisania. W pytaniach typu „Która Owca?” nadal obowiązuje zwykła punktacja Stada.",
   modeFreestyle: "Freestyle: pytania daje gra, a wybrane Owce tworzą odpowiedzi. Autor najczęściej wybranej odpowiedzi może zdobyć Żeton Wełny.",
   modeHardcore: "Sandbox: Baran tworzy pytanie, a przy pytaniu otwartym wybrane Owce tworzą odpowiedzi. To najbardziej kreatywny wariant gry.",
-  modeQuiz: "Quiz: 5 odpowiedzi, dokładnie jedna poprawna. Wybierasz poziom i kategorie. Bez Czarnej Owcy, Barana i Wilka.",
+  modeQuiz: "Quiz: 5 odpowiedzi, dokładnie jedna poprawna. Wybierasz poziom i pulę kategorii. Przed kolejnymi blokami maksymalnie 5 pytań gracze głosują na kategorię. Bez Czarnej Owcy i Wilka.",
   questionTypes: "W STADO są trzy rodzaje rund społecznych: 1) „Co robi Stado?” — wybieracie odpowiedź i liczy się największe Stado; 2) „Która Owca?” — wskazujecie osobę i nadal liczy się największe Stado; 3) „Co zrobi dana Owca?” — losowana jest Owca pod lupą, która wybiera swoją odpowiedź i zawsze dostaje +1 pkt, a pozostali próbują przewidzieć jej wybór za +2 pkt (lub +4 z Żetonem).",
   music: "Domyślna muzyka zmienia się zależnie od etapu i trybu gry. Możesz pozostawić tryb Domyślny albo wymusić jeden z 10 utworów z folderu music. Zmiana wyboru od razu próbuje odtworzyć wskazany utwór.",
   countdownTick: "Opcjonalne, delikatne piknięcie na ekranie prowadzącego przy 5, 4, 3, 2 i 1 sekundzie. Głośność sygnału ustawiasz niezależnie od muzyki.",
-  visualSettings: "Każdy suwak zmienia tylko wskazaną część ekranu głównego. Panele Teraz, Ostatnia runda i Punkty oraz stoper mają osobne skale. Ustawienia zapisują się lokalnie na tym urządzeniu."
+  visualSettings: "Ustawienia grafiki dotyczą tylko ekranu, na którym je otwierasz. Profil urządzenia pomaga dopasować całą grę do telefonu, tabletu, laptopa lub telewizora. Ustawienia są pamiętane do pełnego wyjścia do menu głównego."
 };
 const PROLOGUE = [
   "Każde Stado gdzieś zmierza.",
@@ -69,10 +69,19 @@ const PLAYER_STORAGE_KEY = `stado:${pathKey}:player`;
 const AUDIO_STORAGE_KEY = `stado:${pathKey}:audio`;
 const VISUAL_STORAGE_KEY = `stado:${pathKey}:visual`;
 const AUDIO_TRACK_COUNT=10;
-const VISUAL_DEFAULTS={menu:108,players:100,question:100,answers:85,info:115,history:115,points:115,timer:115};
+const AUDIO_PREFS_VERSION=2;
+const VISUAL_DEFAULTS={configLeft:100,configRight:105,lobby:100,prologue:100,players:100,question:100,answers:85,info:115,history:115,points:115,timer:115,final:100};
 const VISUAL_RANGES={
-  menu:{min:80,max:125,step:5},players:{min:70,max:145,step:5},question:{min:75,max:140,step:5},answers:{min:65,max:125,step:5},
-  info:{min:75,max:170,step:5},history:{min:75,max:170,step:5},points:{min:75,max:170,step:5},timer:{min:80,max:180,step:5}
+  configLeft:{min:75,max:125,step:5},configRight:{min:75,max:150,step:5},lobby:{min:75,max:135,step:5},prologue:{min:75,max:135,step:5},
+  players:{min:70,max:145,step:5},question:{min:75,max:140,step:5},answers:{min:65,max:125,step:5},
+  info:{min:75,max:180,step:5},history:{min:75,max:180,step:5},points:{min:75,max:180,step:5},timer:{min:80,max:190,step:5},final:{min:75,max:140,step:5}
+};
+const DEVICE_PROFILES={
+  auto:{label:"Automatycznie",hint:"wg bieżącego okna"},
+  phone:{label:"iPhone / mały ekran",hint:"ok. 390 × 844"},
+  tablet:{label:"Tablet",hint:"ok. 1024 × 768"},
+  laptop:{label:"Laptop",hint:"ok. 1366 × 768"},
+  tv:{label:"Telewizor",hint:"ok. 1920 × 1080"}
 };
 const TAB_STORAGE_KEY = `stado:${pathKey}:hosttab`;
 const LOCK_STORAGE_KEY = `stado:${pathKey}:hostlock`;
@@ -125,10 +134,10 @@ const runtime = {
     joinDraft:{roomCode:"", name:"", sheepId:"", recover:false}, pendingJoin:null,
     joinAttemptToken:"", joining:false, joinRetryAttempt:0, joinRetryTimer:null, joinWelcomeTimer:null, joinOpenTimer:null,
     joinConnectionMode:"all", joinFailed:false, lastJoinError:"",
-    drafts:{question:"", answer:"", hardcoreType:"open", voteOptionId:"", useToken:false, huntTargetId:"", huntOptionId:""},
+    drafts:{question:"", answer:"", hardcoreType:"open", voteOptionId:"", useToken:false, huntTargetId:"", huntOptionId:"", categoryKey:"", categoryUseToken:false, categoryTieKey:""},
     waitingRecovery:false, reconnecting:false, lastAttemptId:null
   },
-  audio: {track:0, defaultTrack:1, manualTrack:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:"", tickEnabled:true, tickVolume:.18, lastTickKey:"", tickContext:null},
+  audio: {track:0, defaultTrack:1, manualTrack:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:"", tickEnabled:true, tickVolume:1, lastTickKey:"", tickContext:null},
   visual: loadVisualPrefs(),
   data: normalizeQuestionData(rawQuestions),
   quizData: normalizeQuizData(rawQuizQuestions),
@@ -177,7 +186,11 @@ function bindGlobalEvents(){
   document.addEventListener("click", handleClick);
   document.addEventListener("input", handleInput);
   document.addEventListener("change", handleChange);
-  window.addEventListener("resize",()=>requestAnimationFrame(()=>{applyVisualSettingsToDOM();fitHostAnswerText();fitWhichSheepCards();fitHostInfoText();updateCountdownNodes();}));
+  window.addEventListener("resize",()=>requestAnimationFrame(()=>{applyVisualSettings();applyVisualSettingsToDOM();fitHostAnswerText();fitWhichSheepCards();fitHostInfoText();updateCountdownNodes();}));
+  document.addEventListener("pointerover",e=>{const tip=e.target.closest?.(".info-tip[data-tooltip]");if(tip)showFloatingTooltip(tip);});
+  document.addEventListener("pointerout",e=>{const tip=e.target.closest?.(".info-tip[data-tooltip]");if(tip&&!tip.contains(e.relatedTarget))hideFloatingTooltip();});
+  document.addEventListener("focusin",e=>{const tip=e.target.closest?.(".info-tip[data-tooltip]");if(tip)showFloatingTooltip(tip);});
+  document.addEventListener("focusout",e=>{if(e.target.closest?.(".info-tip[data-tooltip]"))hideFloatingTooltip();});
   document.addEventListener("visibilitychange",()=>{if(!document.hidden)kickPlayerReconnect();});
   window.addEventListener("pageshow",()=>kickPlayerReconnect());
   window.addEventListener("online",()=>kickPlayerReconnect());
@@ -211,7 +224,7 @@ function handleClick(e){
   const a = el.dataset.action;
   if(runtime.role === "host" || a === "create-game") unlockTickAudio();
   const id = el.dataset.id;
-  const value = el.dataset.value;
+  const value = el.dataset.value ?? el.value;
   const p = runtime.player;
 
   if(a === "create-game"){
@@ -231,12 +244,20 @@ function handleClick(e){
   if(a === "how"){ runtime.modal = {type:"how"}; render(); return; }
   if(a === "back-start"){
     if(runtime.host.room) return;
+    if(runtime.role==="host") resetPresentationPrefs();
     runtime.role = "start"; pauseAllMusic(); render(); return;
   }
   if(a === "open-settings"){ runtime.modal = {type:"settings"}; render(); return; }
-  if(a === "open-graphics-settings"){ runtime.modal = {type:"graphics-settings"}; render(); return; }
-  if(a === "visual-reset"){ runtime.visual={...VISUAL_DEFAULTS};saveVisualPrefs();applyVisualSettings();render();return; }
-  if(a === "close-modal"){ runtime.modal = null; render(); return; }
+  if(a === "open-graphics-settings"){ runtime.modal = {type:"graphics-settings",screen:currentVisualScreen()}; render(); return; }
+  if(a === "visual-reset"){ resetCurrentVisualScreen(); saveVisualPrefs(); applyVisualSettings(); render(); return; }
+  if(a === "device-profile"){
+    const profile=String(value||"auto");
+    if(DEVICE_PROFILES[profile]){runtime.visual.device=profile;saveVisualPrefs();applyVisualSettings();render();}
+    return;
+  }
+  if(a === "music-default"){ runtime.audio.manualTrack=0;saveAudioPrefs();playMusic(currentDefaultMusicTrack(),true);render();return; }
+  if(a === "audio-volume-reset"){ runtime.audio.volume=.35;runtime.audio.tickVolume=1;runtime.audio.muted=false;syncAudioElements();saveAudioPrefs();render();return; }
+  if(a === "close-modal"){ hideFloatingTooltip(); runtime.modal = null; render(); return; }
 
   if(a === "settings-new-game"){
     if(!runtime.host.room) return;
@@ -254,6 +275,7 @@ function handleClick(e){
   if(a === "settings-exit-menu"){
     if(!runtime.host.room){
       runtime.modal=null;
+      resetPresentationPrefs();
       runtime.role="start";
       pauseAllMusic();
       render();
@@ -270,6 +292,7 @@ function handleClick(e){
   if(a === "help-info"){
     const key=String(id||value||"");
     const text=CONFIG_HELP[key];
+    hideFloatingTooltip();
     if(text){runtime.modal={type:"help-info",helpKey:key,text};render();}
     return;
   }
@@ -312,12 +335,6 @@ function handleClick(e){
     runtime.configDraft.quizCategories=[...ALL_QUIZ_CATEGORY_KEYS];
     render(); return;
   }
-  if(a === "wolf-toggle"){
-    if(runtime.configDraft.mode === "quiz")return;
-    runtime.configDraft.wolfEnabled = !runtime.configDraft.wolfEnabled;
-    if(runtime.host.room) runtime.host.room.config.wolfEnabled = runtime.configDraft.wolfEnabled;
-    render(); return;
-  }
   if(a === "create-room"){ createOrApplyRoom(); return; }
 
   if(a === "add-bot"){ hostAddBot(); return; }
@@ -336,6 +353,8 @@ function handleClick(e){
   if(a === "next-prologue"){ hostAdvancePrologue(true); return; }
   if(a === "show-results"){ hostSettleRound(); return; }
   if(a === "next-round"){ hostNextRound(); return; }
+  if(a === "demo-category-votes"){ demoCategoryVotes(); return; }
+  if(a === "demo-category-tie"){ demoCategoryTie(); return; }
   if(a === "show-final"){ hostFinalize(false); return; }
   if(a === "pause"){ hostTogglePause(); return; }
   if(a === "abort-round"){ confirmModal("Pominąć pytanie?", "Bieżąca próba nie da punktów i nie zużyje żetonów.", () => hostAbortAttempt("Pominięto pytanie.")); return; }
@@ -369,13 +388,16 @@ function handleClick(e){
   if(a === "submit-answer"){ playerSubmitAnswer(); return; }
   if(a === "select-vote"){ p.drafts.voteOptionId = id; render(); return; }
   if(a === "submit-vote"){ playerSubmitVote(); return; }
+  if(a === "select-category-vote"){ p.drafts.categoryKey = String(id||value||""); render(); return; }
+  if(a === "submit-category-vote"){ playerSubmitCategoryVote(); return; }
+  if(a === "select-category-tie"){ p.drafts.categoryTieKey = String(id||value||""); render(); return; }
+  if(a === "submit-category-tie"){ playerSubmitCategoryTie(); return; }
   if(a === "select-hunt-target"){ p.drafts.huntTargetId = id; render(); return; }
   if(a === "select-hunt-option"){ p.drafts.huntOptionId = id; render(); return; }
   if(a === "submit-hunt"){ playerSubmitHunt(false); return; }
   if(a === "skip-hunt"){ playerSubmitHunt(true); return; }
   if(a === "replay-ready"){ playerSendAction("REPLAY_READY",{}); return; }
 
-  if(a === "music-play"){ playMusic(currentDefaultMusicTrack(), true); return; }
 }
 
 function handleInput(e){
@@ -406,7 +428,7 @@ function handleInput(e){
     updateCharCount(t, "answerCount");
     persistPlayer();
   }
-  if(t.dataset.hostvolume) setAudioVolume(+t.value/100);
+  if(t.dataset.hostvolume){ setAudioVolume(+t.value/100); const out=document.querySelector("[data-music-volume-value]");if(out)out.textContent=`${Math.round(runtime.audio.volume*100)}%`; }
   if(t.dataset.tickVolume){ setTickVolume(+t.value/100); const out=document.querySelector("[data-tick-volume-value]");if(out)out.textContent=`${Math.round(runtime.audio.tickVolume*100)}%`; }
   if(t.dataset.visualSetting){
     const key=String(t.dataset.visualSetting);
@@ -422,9 +444,21 @@ function handleInput(e){
 
 function handleChange(e){
   const t=e.target;
+  if("wolfToggle" in t.dataset){
+    if(runtime.configDraft.mode === "quiz")return;
+    runtime.configDraft.wolfEnabled = !!t.checked;
+    if(runtime.host.room) runtime.host.room.config.wolfEnabled = runtime.configDraft.wolfEnabled;
+    render();
+    return;
+  }
   if(t.id === "responseTimeSelect"){
     runtime.configDraft.responseTimeSec = clamp(+t.value,10,120);
     const v=document.querySelector("#responseTimeValue");if(v)v.textContent=formatTimeSetting(runtime.configDraft.responseTimeSec);
+    return;
+  }
+  if("deviceProfile" in t.dataset){
+    const profile=String(t.value||"auto");
+    if(DEVICE_PROFILES[profile]){runtime.visual.device=profile;saveVisualPrefs();applyVisualSettings();render();}
     return;
   }
   if("musicTrack" in t.dataset){
@@ -432,7 +466,13 @@ function handleChange(e){
     return;
   }
   if("tickEnabled" in t.dataset){
-    runtime.audio.tickEnabled=!!t.checked;saveAudioPrefs();unlockTickAudio();return;
+    runtime.audio.tickEnabled=!!t.checked;saveAudioPrefs();unlockTickAudio();render();return;
+  }
+  if("categoryTokenToggle" in t.dataset){
+    runtime.player.drafts.categoryUseToken = !!t.checked;
+    persistPlayer();
+    render();
+    return;
   }
   if("tokenToggle" in t.dataset){
     runtime.player.drafts.useToken = !!t.checked;
@@ -531,9 +571,10 @@ function validQuizRecords(){
   });
 }
 function quizQuestionKey(q){return `quiz|${normalizeText(q.question)}`;}
-function eligibleQuizQuestions(room,includeUsed=false){
+function eligibleQuizQuestions(room,includeUsed=false,categoryOverride=null){
   const seen=new Set(),cfg=ensureQuizConfig({...runtime.configDraft,...(room?.config||{})});
-  const selected=new Set(cfg.quizCategories),difficulty=cfg.quizDifficulty;
+  const activeCategory=categoryOverride || (!includeUsed?room?.match?.quizActiveCategoryKey:null);
+  const selected=new Set(activeCategory?[activeCategory]:cfg.quizCategories),difficulty=cfg.quizDifficulty;
   return validQuizRecords().filter(q=>{
     const key=quizQuestionKey(q);if(seen.has(key))return false;seen.add(key);
     if(q.difficulty!==difficulty||!selected.has(q.categoryKey))return false;
@@ -541,10 +582,14 @@ function eligibleQuizQuestions(room,includeUsed=false){
     return true;
   });
 }
+function quizQuestionsRemainingForCategory(room,key){
+  return eligibleQuizQuestions(room,false,key).length;
+}
 function chooseQuizQuestion(room){
-  const pool=eligibleQuizQuestions(room,false);if(!pool.length)return null;
+  const active=room?.match?.quizActiveCategoryKey||null;
+  const pool=eligibleQuizQuestions(room,false,active);if(!pool.length)return null;
   const q=pick(pool),key=quizQuestionKey(q);room.match.usedQuestionKeys.push(key);
-  return {record:q,questionId:q.id,questionKey:key,type:"quiz",text:q.question,targetPlayerId:null};
+  return {record:q,questionId:q.id,questionKey:key,type:"quiz",text:q.question,targetPlayerId:null,categoryKey:q.categoryKey};
 }
 
 function validateStaticData(){
@@ -672,7 +717,7 @@ function makePlayer({name,sheepId,isBot=false,peerId="",joinToken=""}){
 }
 function makeStats(){
   return {
-    roundsPlayed:0,votesCast:0,herdWins:0,blackSheepWins:0,outsideHerd:0,zeroBaseRounds:0,quizCorrect:0,quizWrong:0,targetHits:0,targetMisses:0,targetFocusRounds:0,
+    roundsPlayed:0,votesCast:0,herdWins:0,blackSheepWins:0,outsideHerd:0,zeroBaseRounds:0,quizCorrect:0,quizWrong:0,targetHits:0,targetMisses:0,targetFocusRounds:0,categoryVotes:0,categoryTokenVotes:0,categoryTokenWins:0,
     tokensUsed:0,tokensSuccessful:0,tokensEarned:0,tokenBonusPoints:0,tokensRedeemed:0,
     answerOpportunities:0,answersWritten:0,answersWon:0,targetRounds:0,ramRounds:0,
     wolfRounds:0,wolfHits:0,wolfMisses:0,wolfSkipped:0,wolfPointsGained:0,wolfPointsLost:0,
@@ -689,6 +734,7 @@ function startNewMatchState(room){
     matchId:uid("m"), plannedRounds:room.config.roundsPlanned, settledRounds:0, roundNumber:0,
     phase:"PROLOGUE", prologueIndex:0, ramOrder, ramCursor:0, typeHistory:[], usedQuestionKeys:[],
     answerAssignCounts,wolfAssignCounts,targetPickCounts, history:[], current:null,
+    quizActiveCategoryKey:null,quizCategoryBlockStart:0,quizCategoryBlockEnd:0,quizCategoryBlockNumber:0,quizCategoryHistory:[],
     finalized:false, finalResult:null, earlyEnded:false
   };
 }
@@ -698,7 +744,7 @@ function classifiedPlayers(room=runtime.host.room){ return activePlayers(room); 
 function minPlayersForMode(mode){return mode==="quiz"?2:MIN_PLAYERS;}
 function minPlayersForRoom(room=runtime.host.room){return minPlayersForMode(room?.config?.mode||runtime.configDraft.mode);}
 function actualAnswerCount(room=runtime.host.room){ return Math.min(room.config.answerCountRequested, activePlayers(room).length); }
-function startingTokens(room=runtime.host.room){return ["warmup","quiz"].includes(room?.config?.mode)?2:1;}
+function startingTokens(room=runtime.host.room){return room?.config?.mode==="warmup"?2:1;}
 function playerById(id,room=runtime.host.room){ return room?.players?.find(p=>p.playerId===id); }
 function sheepById(id){ return sheepMap.get(String(id)) || {id:"missing",name:"Owca",description:"",smallAvatar:"",bigAvatar:""}; }
 function currentAttempt(room=runtime.host.room){ return room?.match?.current || null; }
@@ -804,6 +850,8 @@ function hostHandleMessage(conn,msg){
   if(msg.type==="SUBMIT_QUESTION"){ hostAction(conn,msg,()=>handleSubmitQuestion(conn.__playerId,msg.payload||{})); return; }
   if(msg.type==="SUBMIT_ANSWER"){ hostAction(conn,msg,()=>handleSubmitAnswer(conn.__playerId,msg.payload||{})); return; }
   if(msg.type==="SUBMIT_VOTE"){ hostAction(conn,msg,()=>handleSubmitVote(conn.__playerId,msg.payload||{})); return; }
+  if(msg.type==="SUBMIT_CATEGORY_VOTE"){ hostAction(conn,msg,()=>handleSubmitCategoryVote(conn.__playerId,msg.payload||{})); return; }
+  if(msg.type==="SUBMIT_CATEGORY_TIE"){ hostAction(conn,msg,()=>handleSubmitCategoryTie(conn.__playerId,msg.payload||{})); return; }
   if(msg.type==="SUBMIT_HUNT"){ hostAction(conn,msg,()=>handleSubmitHunt(conn.__playerId,msg.payload||{},false)); return; }
   if(msg.type==="SKIP_HUNT"){ hostAction(conn,msg,()=>handleSubmitHunt(conn.__playerId,msg.payload||{},true)); return; }
 }
@@ -976,12 +1024,31 @@ function removeFromRamOrder(r,pid){
 function configuredResponseSeconds(r=runtime.host.room){
   return clamp(+(r?.config?.responseTimeSec ?? runtime.configDraft.responseTimeSec ?? 60),10,120);
 }
-function isTimedPhase(phase){return ["QUESTION_INPUT","ANSWER_INPUT","VOTING"].includes(phase);}
+function quizCategoryVoteSeconds(r=runtime.host.room){
+  const sec=configuredResponseSeconds(r);
+  // Ustalone tempo: 10→20 s, 20→30 s; przy 30 s i dłużej głosowanie trwa tyle samo co pytanie.
+  return sec<=20?sec+10:sec;
+}
+function isTimedPhase(phase){return ["QUESTION_INPUT","ANSWER_INPUT","VOTING","CATEGORY_VOTING","CATEGORY_TIE_BREAK"].includes(phase);}
+function timedPhaseSeconds(r,c){return ["CATEGORY_VOTING","CATEGORY_TIE_BREAK"].includes(c?.phase)?quizCategoryVoteSeconds(r):configuredResponseSeconds(r);}
+function quizCategoryVotingEnabled(r=runtime.host.room){return !!r&&r.config.mode==="quiz"&&(r.config.quizCategories||[]).length>1;}
+function quizBlockSize(r=runtime.host.room){return Math.min(5,Math.max(0,(r?.match?.plannedRounds||0)-(r?.match?.settledRounds||0)));}
+function shouldStartQuizCategoryVote(r=runtime.host.room){
+  const m=r?.match;if(!m||m.finalized||r.config.mode!=="quiz"||m.settledRounds>=m.plannedRounds)return false;
+  if(!quizCategoryVotingEnabled(r))return false;
+  return !m.quizActiveCategoryKey || m.settledRounds>=m.quizCategoryBlockEnd;
+}
+function activateSingleQuizCategory(r){
+  const m=r.match,key=(r.config.quizCategories||[])[0]||null;if(!key)return false;
+  m.quizActiveCategoryKey=key;m.quizCategoryBlockStart=m.settledRounds+1;m.quizCategoryBlockEnd=Math.min(m.plannedRounds,m.settledRounds+5);m.quizCategoryBlockNumber++;
+  m.quizCategoryHistory.push({block:m.quizCategoryBlockNumber,key,start:m.quizCategoryBlockStart,end:m.quizCategoryBlockEnd,automatic:true,at:Date.now()});
+  return true;
+}
 function clearPhaseTimer(){if(runtime.host.phaseTimer){clearTimeout(runtime.host.phaseTimer);runtime.host.phaseTimer=null;}}
 function armPhaseTimer(r,c,reset=true){
   clearPhaseTimer();
   if(!r||!c||!isTimedPhase(c.phase))return;
-  const now=Date.now(),duration=configuredResponseSeconds(r)*1000;
+  const now=Date.now(),duration=timedPhaseSeconds(r,c)*1000;
   if(reset||!c.phaseDeadlineAt){c.phaseStartedAt=now;c.phaseDeadlineAt=now+duration;c.phaseRemainingMs=null;}
   if(r.paused){c.phaseRemainingMs=Math.max(0,(c.phaseDeadlineAt||now)-now);c.phaseDeadlineAt=0;return;}
   const attemptId=c.attemptId,phase=c.phase,delay=Math.max(20,(c.phaseDeadlineAt||now)-now+20);
@@ -995,13 +1062,24 @@ function pausePhaseTimer(r){
 }
 function resumePhaseTimer(r){
   const c=currentAttempt(r);if(!c||!isTimedPhase(c.phase))return;
-  const remaining=Number.isFinite(c.phaseRemainingMs)?c.phaseRemainingMs:configuredResponseSeconds(r)*1000;
+  const remaining=Number.isFinite(c.phaseRemainingMs)?c.phaseRemainingMs:timedPhaseSeconds(r,c)*1000;
   c.phaseDeadlineAt=Date.now()+Math.max(250,remaining);c.phaseRemainingMs=null;armPhaseTimer(r,c,false);
 }
 function handlePhaseTimeout(attemptId,phase){
   const r=runtime.host.room,c=currentAttempt(r);
   if(!r||!c||c.attemptId!==attemptId||c.phase!==phase||r.paused||c.settlement)return;
   clearPhaseTimer();c.phaseDeadlineAt=0;c.phaseRemainingMs=0;c.phaseTimedOut=true;c.timeoutPhase=phase;
+  if(phase==="CATEGORY_VOTING"){
+    c.timedOutPlayerIds=activePlayers(r).filter(pl=>!c.categoryVotes?.[pl.playerId]).map(pl=>pl.playerId);
+    settleQuizCategoryVote(r,c);
+    return;
+  }
+  if(phase==="CATEGORY_TIE_BREAK"){
+    const key=pick(c.categoryTieKeys||c.categoryCandidates||[]);
+    if(key)finishQuizCategoryVote(r,c,key,true);
+    else hostAbortAttempt("Nie udało się rozstrzygnąć kategorii.");
+    return;
+  }
   if(phase==="QUESTION_INPUT"){
     c.timedOutPlayerIds=[c.ramPlayerId].filter(Boolean);
     hostAbortAttempt("Baran nie zdążył przygotować pytania — losujemy kolejną próbę.");
@@ -1060,9 +1138,89 @@ function hostAdvancePrologue(manual=false){
 function stopPrologueTimer(){if(runtime.host.prologueTimer){clearInterval(runtime.host.prologueTimer);runtime.host.prologueTimer=null;}}
 function hostFinishPrologue(){
   const r=runtime.host.room;if(!r||r.status!=="PROLOGUE")return;
-  stopPrologueTimer();r.status="ROUND";playMusic(MODE[r.config.mode].music);prepareRound();
+  stopPrologueTimer();r.status="ROUND";playMusic(MODE[r.config.mode].music);
+  if(r.config.mode==="quiz"){
+    if(quizCategoryVotingEnabled(r))startQuizCategoryVote();
+    else{activateSingleQuizCategory(r);prepareRound();}
+  }else prepareRound();
 }
 
+function quizCategoryCandidateKeys(r){
+  const selected=(r.config.quizCategories||[]).filter(k=>ALL_QUIZ_CATEGORY_KEYS.includes(k));
+  const needed=Math.max(1,quizBlockSize(r));
+  let available=selected.filter(k=>quizQuestionsRemainingForCategory(r,k)>=needed);
+  if(!available.length)available=selected.filter(k=>quizQuestionsRemainingForCategory(r,k)>0);
+  if(available.length<=4)return shuffle(available);
+  return shuffle(available).slice(0,4);
+}
+function startQuizCategoryVote(){
+  const r=runtime.host.room,m=r?.match;if(!r||!m||m.finalized||r.config.mode!=="quiz")return;
+  clearPhaseTimer();
+  if(!quizCategoryVotingEnabled(r)){
+    activateSingleQuizCategory(r);prepareRound();return;
+  }
+  const candidates=quizCategoryCandidateKeys(r);
+  if(!candidates.length){
+    const cur={roundId:uid("round"),attemptId:uid("attempt"),number:m.settledRounds+1,type:"quiz_category_vote",phase:"NO_QUESTIONS",questionText:"",categoryCandidates:[],createdAt:Date.now(),settlement:null};
+    m.current=cur;commitHost("Brak kategorii Quiz");return;
+  }
+  if(candidates.length===1){
+    const fake={blockStartRound:m.settledRounds+1,blockEndRound:Math.min(m.plannedRounds,m.settledRounds+5),categoryCandidates:candidates,categoryVotes:{},categoryTieKeys:[],categoryRamPlayerId:null};
+    finishQuizCategoryVote(r,fake,candidates[0],true);return;
+  }
+  const cur={
+    roundId:uid("category"),attemptId:uid("categoryVote"),number:m.settledRounds+1,type:"quiz_category_vote",phase:"CATEGORY_VOTING",questionText:"",
+    categoryCandidates:candidates,categoryVotes:{},categoryTotals:{},categoryTieKeys:[],categoryRamPlayerId:null,categoryRamChoice:null,
+    blockStartRound:m.settledRounds+1,blockEndRound:Math.min(m.plannedRounds,m.settledRounds+5),
+    timedOutPlayerIds:[],phaseStartedAt:0,phaseDeadlineAt:0,phaseRemainingMs:null,phaseTimedOut:false,timeoutPhase:null,createdAt:Date.now(),settlement:null
+  };
+  m.current=cur;armPhaseTimer(r,cur,true);commitHost("Głosowanie na kategorię Quiz");
+}
+function handleSubmitCategoryVote(pid,payload){
+  const r=runtime.host.room,c=currentAttempt(r);ensurePhase(c,"CATEGORY_VOTING");
+  if(c.type!=="quiz_category_vote")throw gameErr("To nie jest głosowanie kategorii.","PHASE");
+  if(c.categoryVotes?.[pid])throw gameErr("Głos na kategorię jest już zapisany.","DUPLICATE");
+  const key=String(payload.categoryKey||"");if(!(c.categoryCandidates||[]).includes(key))throw gameErr("Ta kategoria nie jest dostępna.","OPTION");
+  const pl=playerById(pid,r),useToken=!!payload.useToken;
+  if(useToken&&pl.tokens<1)throw gameErr("Nie masz dostępnego Żetonu Wełny.","TOKEN");
+  if(useToken){pl.tokens=Math.max(0,pl.tokens-1);pl.stats.tokensUsed++;pl.stats.categoryTokenVotes=(pl.stats.categoryTokenVotes||0)+1;}
+  pl.stats.categoryVotes=(pl.stats.categoryVotes||0)+1;
+  c.categoryVotes[pid]={categoryKey:key,useToken,weight:1+(useToken?10:0),actionAt:Date.now()};
+  if(activePlayers(r).every(x=>c.categoryVotes[x.playerId]))settleQuizCategoryVote(r,c);
+  return {message:useToken?"Głos zapisany. Żeton daje +10 dodatkowych głosów.":"Głos na kategorię zapisany."};
+}
+function settleQuizCategoryVote(r,c){
+  if(!r||!c||c.type!=="quiz_category_vote"||c.phase!=="CATEGORY_VOTING")return;
+  clearPhaseTimer();c.phaseDeadlineAt=0;c.phaseRemainingMs=null;
+  const totals={};(c.categoryCandidates||[]).forEach(k=>totals[k]=0);
+  Object.values(c.categoryVotes||{}).forEach(v=>{if(Object.prototype.hasOwnProperty.call(totals,v.categoryKey))totals[v.categoryKey]+=v.weight||1;});
+  c.categoryTotals=totals;
+  const max=Math.max(0,...Object.values(totals));
+  const tied=(c.categoryCandidates||[]).filter(k=>totals[k]===max);
+  if(tied.length===1){finishQuizCategoryVote(r,c,tied[0],false);return;}
+  c.categoryTieKeys=tied.length?tied:[...(c.categoryCandidates||[])];
+  const ram=pick(activePlayers(r));c.categoryRamPlayerId=ram?.playerId||null;c.phase="CATEGORY_TIE_BREAK";
+  armPhaseTimer(r,c,true);commitHost("Remis kategorii — losujemy Barana");
+}
+function handleSubmitCategoryTie(pid,payload){
+  const r=runtime.host.room,c=currentAttempt(r);ensurePhase(c,"CATEGORY_TIE_BREAK");
+  if(c.categoryRamPlayerId!==pid)throw gameErr("Tylko wylosowany Baran może rozstrzygnąć remis.","ROLE");
+  const key=String(payload.categoryKey||"");if(!(c.categoryTieKeys||[]).includes(key))throw gameErr("Wybierz jedną z remisujących kategorii.","OPTION");
+  c.categoryRamChoice=key;finishQuizCategoryVote(r,c,key,false);
+  return {message:"Kategoria wybrana."};
+}
+function finishQuizCategoryVote(r,c,key,automatic=false){
+  const m=r?.match;if(!m||!key)return;
+  clearPhaseTimer();
+  const start=c.blockStartRound||m.settledRounds+1,end=c.blockEndRound||Math.min(m.plannedRounds,m.settledRounds+5);
+  m.quizActiveCategoryKey=key;m.quizCategoryBlockStart=start;m.quizCategoryBlockEnd=end;m.quizCategoryBlockNumber=(m.quizCategoryBlockNumber||0)+1;
+  m.quizCategoryHistory=m.quizCategoryHistory||[];m.quizCategoryHistory.push({block:m.quizCategoryBlockNumber,key,start,end,automatic:!!automatic,totals:{...(c.categoryTotals||{})},at:Date.now()});
+  Object.entries(c.categoryVotes||{}).forEach(([pid,v])=>{if(v.useToken&&v.categoryKey===key){const pl=playerById(pid,r);if(pl)pl.stats.tokensSuccessful++;if(pl)pl.stats.categoryTokenWins=(pl.stats.categoryTokenWins||0)+1;}});
+  if(c.type==="quiz_category_vote"){c.winningCategoryKey=key;c.phase="CATEGORY_RESULT";c.phaseDeadlineAt=0;c.phaseRemainingMs=null;}
+  commitHost(`Wybrano kategorię Quiz: ${quizCategoryLabel(key)}`);
+  const attemptId=c.attemptId||"";
+  setTimeout(()=>{const rr=runtime.host.room,cc=currentAttempt(rr);if(!rr||rr.match?.finalized)return;if(c.type==="quiz_category_vote"&&cc?.attemptId!==attemptId)return;prepareRound();},900);
+}
 function prepareRound(){
   const r=runtime.host.room,m=r.match;if(!r||!m||m.finalized)return;
   if(activePlayers(r).length<minPlayersForRoom(r)){hostFinalize(true);return;}
@@ -1079,9 +1237,16 @@ function prepareRound(){
     cur.ramPlayerId=getCurrentRam(r);
     cur.phase="QUESTION_INPUT";
   }else if(r.config.mode==="quiz"){
+    if(!m.quizActiveCategoryKey){
+      if(quizCategoryVotingEnabled(r)){startQuizCategoryVote();return;}
+      activateSingleQuizCategory(r);
+    }else if(!quizCategoryVotingEnabled(r)&&m.settledRounds>=m.quizCategoryBlockEnd){
+      // Przy jednej wybranej kategorii nie ma głosowania, ale aktualizujemy zakres kolejnego bloku 5 pytań.
+      activateSingleQuizCategory(r);
+    }
     const q=chooseQuizQuestion(r);
     if(!q){cur.phase="NO_QUESTIONS";m.current=cur;commitHost("Brak pytań Quiz");return;}
-    cur.type="quiz";cur.questionId=q.questionId;cur.questionKey=q.questionKey;cur.questionText=q.text;cur.targetPlayerId=null;
+    cur.type="quiz";cur.questionId=q.questionId;cur.questionKey=q.questionKey;cur.questionText=q.text;cur.targetPlayerId=null;cur.quizCategoryKey=q.categoryKey||m.quizActiveCategoryKey;
     cur.options=shuffle(q.record.answers.map((text,i)=>({optionId:uid("opt"),text,authorPlayerId:null,candidatePlayerId:null,isCorrect:i===q.record.correctIndex})))
       .map((o,i)=>({...o,order:i,letter:COLORS[i]?.letter||String(i+1),colorKey:COLORS[i]?.key||"a"}));
     cur.correctOptionId=cur.options.find(o=>o.isCorrect)?.optionId||null;
@@ -1396,7 +1561,7 @@ function hostNextRound(){
   const r=runtime.host.room,m=r?.match,c=m?.current;
   if(!r||!m||!c||c.phase!=="RESULT")return;
   if(m.settledRounds>=m.plannedRounds){hostFinalize(false);return;}
-  prepareRound();
+  if(shouldStartQuizCategoryVote(r))startQuizCategoryVote();else prepareRound();
 }
 
 function hostAbortAttempt(reason="Pominięto pytanie.",fromRemoval=false){
@@ -1472,7 +1637,7 @@ function hostCloseRoom(){
   stopPrologueTimer();releaseWakeLock();releaseHostLock();
   try{runtime.host.peer?.destroy();}catch{}
   localStorage.removeItem(HOST_STORAGE_KEY);runtime.host.room=null;runtime.host.peer=null;runtime.host.conns.clear();runtime.host.playerConns.clear();
-  runtime.role="start";runtime.modal=null;pauseAllMusic();render();
+  runtime.role="start";runtime.modal=null;pauseAllMusic();resetPresentationPrefs();render();
 }
 
 function hostTogglePause(){
@@ -1508,6 +1673,22 @@ function demoVotes(){
     if(!c.votes[pl.playerId]&&c.options.length){const opt=pick(c.options);handleSubmitVote(pl.playerId,{optionId:opt.optionId,useToken:pl.tokens>0&&Math.random()<.15});}
   }
   commitHost("BOT-y zagłosowały");
+}
+function demoCategoryVotes(){
+  const r=runtime.host.room,c=currentAttempt(r);if(!r||!c||c.type!=="quiz_category_vote"||c.phase!=="CATEGORY_VOTING")return;
+  activePlayers(r).filter(p=>p.isBot&&!c.categoryVotes[p.playerId]).forEach(pl=>{
+    const key=pick(c.categoryCandidates||[]);if(!key)return;
+    const useToken=pl.tokens>0&&Math.random()<.18;
+    try{handleSubmitCategoryVote(pl.playerId,{categoryKey:key,useToken});}catch{}
+  });
+  commitHost("Głosy BOT-ów na kategorię");
+}
+function demoCategoryTie(){
+  const r=runtime.host.room,c=currentAttempt(r);if(!r||!c||c.phase!=="CATEGORY_TIE_BREAK")return;
+  const ram=playerById(c.categoryRamPlayerId,r);if(!ram?.isBot)return;
+  const key=pick(c.categoryTieKeys||[]);if(!key)return;
+  try{handleSubmitCategoryTie(ram.playerId,{categoryKey:key});}catch{}
+  commitHost("BOT rozstrzygnął kategorię");
 }
 function demoHunt(){
   const r=runtime.host.room,c=currentAttempt(r);if(!r||!c||!c.wolfPlayerId)return;
@@ -1553,7 +1734,7 @@ function buildPlayerSnapshot(pid){
     players:buildPublicPlayers(r),match:null
   };
   if(!m)return snap;
-  snap.match={matchId:m.matchId,plannedRounds:m.plannedRounds,settledRounds:m.settledRounds,roundNumber:m.roundNumber,phase:m.phase,prologueIndex:m.prologueIndex,finalized:m.finalized,finalResult:null,current:null};
+  snap.match={matchId:m.matchId,plannedRounds:m.plannedRounds,settledRounds:m.settledRounds,roundNumber:m.roundNumber,phase:m.phase,prologueIndex:m.prologueIndex,finalized:m.finalized,finalResult:null,current:null,quizActiveCategoryKey:m.quizActiveCategoryKey||null,quizCategoryBlockStart:m.quizCategoryBlockStart||0,quizCategoryBlockEnd:m.quizCategoryBlockEnd||0};
   if(m.finalized){
     snap.match.finalResult=JSON.parse(JSON.stringify(m.finalResult));
     snap.match.personalSummary=buildPersonalFinalSummary(r,pl);
@@ -1564,8 +1745,11 @@ function buildPlayerSnapshot(pid){
   snap.match.current={
     attemptId:c.attemptId,number:c.number,phase:c.phase,type:c.type,questionText:c.questionText,
     phaseDeadlineAt:c.phaseDeadlineAt||0,timedOutPlayerIds:[...(c.timedOutPlayerIds||[])],timedOutAuthorIds:[...(c.timedOutAuthorIds||[])],
-    targetPlayerId:c.targetPlayerId,ramPlayerId:c.ramPlayerId,
-    isRam:c.ramPlayerId===pid,isAuthor:c.assignedAuthorIds.includes(pid),isWolf:c.wolfPlayerId===pid,isFocusSheep:c.type==="target"&&c.targetPlayerId===pid,
+    targetPlayerId:c.targetPlayerId,ramPlayerId:c.ramPlayerId,quizCategoryKey:c.quizCategoryKey||m.quizActiveCategoryKey||null,
+    isRam:c.ramPlayerId===pid,isAuthor:(c.assignedAuthorIds||[]).includes(pid),isWolf:c.wolfPlayerId===pid,isFocusSheep:c.type==="target"&&c.targetPlayerId===pid,
+    isCategoryRam:c.categoryRamPlayerId===pid,categoryRamPlayerId:c.categoryRamPlayerId||null,categoryCandidates:[...(c.categoryCandidates||[])],categoryTieKeys:[...(c.categoryTieKeys||[])],winningCategoryKey:c.winningCategoryKey||null,
+    blockStartRound:c.blockStartRound||m.quizCategoryBlockStart||0,blockEndRound:c.blockEndRound||m.quizCategoryBlockEnd||0,
+    myCategoryVote:c.categoryVotes?.[pid]?{...c.categoryVotes[pid]}:null,categoryVotingProgress:{done:Object.keys(c.categoryVotes||{}).length,total:activePlayers(r).length},
     myAnswer:c.answers?.[pid]?.text||"",myVote:c.votes?.[pid]||null,myWolfDecision:c.wolfPlayerId===pid?c.wolfDecision||null:null,
     authorProgress:{done:Object.keys(c.answers||{}).length,total:(c.assignedAuthorIds||[]).length},
     votingProgress:{done:Object.keys(c.votes||{}).length,total:activePlayers(r).length},
@@ -1894,6 +2078,15 @@ function playerSubmitVote(){
   const useToken=isFocusSheep?false:!!p.drafts.useToken;if(useToken && (p.snapshot?.self?.tokens||0)<1){toast("Nie masz Żetonu Wełny.","error");return;}
   playerSendAction("SUBMIT_VOTE",{optionId:p.drafts.voteOptionId,useToken}).then(()=>{p.drafts.voteOptionId="";p.drafts.useToken=false;persistPlayer();});
 }
+function playerSubmitCategoryVote(){
+  const p=runtime.player,key=p.drafts.categoryKey;if(!key){toast("Najpierw wybierz kategorię.","error");return;}
+  const useToken=!!p.drafts.categoryUseToken;if(useToken&&(p.snapshot?.self?.tokens||0)<1){toast("Nie masz Żetonu Wełny.","error");return;}
+  playerSendAction("SUBMIT_CATEGORY_VOTE",{categoryKey:key,useToken}).then(()=>{p.drafts.categoryKey="";p.drafts.categoryUseToken=false;persistPlayer();});
+}
+function playerSubmitCategoryTie(){
+  const p=runtime.player,key=p.drafts.categoryTieKey;if(!key){toast("Wybierz kategorię, która wygra remis.","error");return;}
+  playerSendAction("SUBMIT_CATEGORY_TIE",{categoryKey:key}).then(()=>{p.drafts.categoryTieKey="";persistPlayer();});
+}
 function playerSubmitHunt(skip){
   const p=runtime.player;if(!skip&&(!p.drafts.huntTargetId||!p.drafts.huntOptionId)){toast("Wybierz Owcę i przewidywany głos.","error");return;}
   const type=skip?"SKIP_HUNT":"SUBMIT_HUNT";
@@ -1929,8 +2122,12 @@ function syncDraftsToSnapshot(){
     runtime.player.drafts.useToken=false;
     runtime.player.drafts.huntTargetId="";
     runtime.player.drafts.huntOptionId="";
+    runtime.player.drafts.categoryKey="";
+    runtime.player.drafts.categoryUseToken=false;
+    runtime.player.drafts.categoryTieKey="";
   }
   if(c.myVote){runtime.player.drafts.voteOptionId=c.myVote.optionId;runtime.player.drafts.useToken=!!c.myVote.useToken;}
+  if(c.myCategoryVote){runtime.player.drafts.categoryKey=c.myCategoryVote.categoryKey;runtime.player.drafts.categoryUseToken=!!c.myCategoryVote.useToken;}
   // Po zaakceptowaniu odpowiedzi nie trzymamy jej jako draftu. Serwer i tak
   // przechowuje ją w c.myAnswer, a formularz nie jest już edytowalny.
   if(c.myAnswer)runtime.player.drafts.answer="";
@@ -1993,7 +2190,7 @@ function renderHost(){
 
 function infoTip(key,label="Więcej informacji"){
   const text=CONFIG_HELP[key]||"";
-  return `<button type="button" class="info-tip" data-action="help-info" data-id="${escAttr(key)}" aria-label="${escAttr(label)}">i<span class="info-tip-pop">${esc(text)}</span></button>`;
+  return `<button type="button" class="info-tip" data-action="help-info" data-id="${escAttr(key)}" data-tooltip="${escAttr(text)}" aria-label="${escAttr(label)}">i</button>`;
 }
 
 function renderConfig(room=null){
@@ -2013,7 +2210,7 @@ function renderConfig(room=null){
         <h3 class="subhead config-section-title">Jak grubo gramy?</h3>
         <div class="mode-cards">${Object.entries(MODE).map(([key,m])=>`<div class="mode-card-wrap"><button class="mode-card ${cfg.mode===key?"active":""}" data-action="mode" data-value="${key}"><span class="mode-kicker">${esc(m.short)}</span><b>${modeIcon(key)} ${esc(m.label)}</b><small>${esc(m.desc)}</small></button>${infoTip(key==="warmup"?"modeWarmup":key==="freestyle"?"modeFreestyle":key==="hardcore"?"modeHardcore":"modeQuiz",`Opis trybu ${m.label}`)}</div>`).join("")}</div>
         ${cfg.mode==="quiz"?renderQuizConfigControls(cfg):`<div class="config-label-row config-section-title"><h3 class="subhead">Liczba odpowiedzi</h3>${infoTip("answers","Jak dobrać liczbę odpowiedzi?")}</div><div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div>`}
-        ${cfg.mode!=="quiz"?`<div class="info-item compact-setting"><div class="spread"><span class="setting-title">🐺 Tryb Wilka ${infoTip("wolf","Jak działa Wilk?")}</span><span class="switch"><input type="checkbox" ${cfg.wolfEnabled?"checked":""} data-action="wolf-toggle"><span></span></span></div></div>`:""}
+        ${cfg.mode!=="quiz"?`<div class="info-item compact-setting"><div class="spread"><span class="setting-title">🐺 Tryb Wilka ${infoTip("wolf","Jak działa Wilk?")}</span><label class="switch" aria-label="Włącz lub wyłącz Tryb Wilka"><input type="checkbox" data-wolf-toggle ${cfg.wolfEnabled?"checked":""}><span></span></label></div></div>`:""}
         <div class="row wrap config-actions"><button class="btn" data-action="create-room">${room?"ZAPISZ I WRÓĆ DO LOBBY":"UTWÓRZ POKÓJ"}</button>${!room?`<button class="btn light" data-action="back-start">Wróć</button>`:""}</div><div class="config-version">${versionHTML()}</div>
       </article>
       <article class="card pad config-side-card">
@@ -2029,7 +2226,7 @@ function renderConfig(room=null){
 }
 
 function renderConfigScoring(cfg){
-  if(cfg.mode==="quiz")return `<div class="config-score-groups one"><div class="config-score-group"><h4>🧠 Quiz</h4><div class="config-score-row"><b>✅ +2</b><span>poprawna</span></div><div class="config-score-row"><b>❌ 0</b><span>błędna / brak</span></div><div class="config-score-row"><b>🧶 ×2</b><span>poprawna = +4</span></div><div class="config-score-row"><b>🧶 +1</b><span>za każdy zachowany żeton w finale</span></div></div></div>`;
+  if(cfg.mode==="quiz")return `<div class="config-score-groups one"><div class="config-score-group"><h4>🧠 Quiz</h4><div class="config-score-row"><b>✅ +2</b><span>poprawna odpowiedź</span></div><div class="config-score-row"><b>❌ 0</b><span>błędna / brak</span></div><div class="config-score-row"><b>🧶 ×2</b><span>poprawna odpowiedź = +4</span></div><div class="config-score-row"><b>🗳 🧶 +10</b><span>dodatkowych głosów na kategorię</span></div><div class="config-score-row"><b>🧶 +1</b><span>zachowany Żeton w finale</span></div><div class="config-score-row"><b>START: 1 🧶</b><span>wybierasz: kategoria, ×2 albo finał</span></div></div></div>`;
   const author=cfg.mode!=="warmup"?`<div class="config-score-row"><b>✍️ +1 🧶</b><span>autor najczęściej wybranej odpowiedzi — tylko gdy gracze piszą odpowiedzi</span></div>`:"";
   const wolf=cfg.wolfEnabled?`<div class="config-score-row"><b>🐺</b><span>zwykłe rundy: trafienie +1 / cel −2 • pudło −1</span></div>`:"";
   return `<div class="config-score-groups"><div class="config-score-group"><h4>🐑 Co robi Stado? / Która Owca?</h4><div class="config-score-row"><b>+2</b><span>największe Stado</span></div><div class="config-score-row"><b>+1</b><span>remis największych Stad</span></div><div class="config-score-row"><b>🖤 +3</b><span>jedyna samotna Czarna Owca</span></div><div class="config-score-row"><b>🧶 ×2</b><span>podwaja Twój wynik za głos</span></div>${author}${wolf}</div><div class="config-score-group accent"><h4>🔎 Co zrobi dana Owca?</h4><div class="config-score-row"><b>🔎 +1</b><span>Owca pod lupą — zawsze</span></div><div class="config-score-row"><b>🎯 +2</b><span>trafisz jej wybór</span></div><div class="config-score-row"><b>❌ 0</b><span>pudło</span></div><div class="config-score-row"><b>🧶 ×2</b><span>trafienie = +4</span></div></div></div>`;
@@ -2073,7 +2270,7 @@ function renderLobbyPlayer(p){return `<div class="lobby-player ${p.isBot?"bot":"
 
 function renderPrologue(r){
   const i=r.match?.prologueIndex||0;
-  return `<main class="prologue prologue-clickable" data-action="next-prologue"><div class="topbar">${logoHTML()}<div class="row"><button class="btn secondary" data-action="skip-prologue">Pomiń prolog</button><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></div><div class="prologue-main"><div class="prologue-box"><div class="prologue-scene"><img src="assets/scenes/prolog.png" alt="Stado rusza"></div><div class="prologue-text">${esc(PROLOGUE[i])}</div><div class="prologue-dots">${PROLOGUE.map((_,j)=>`<i class="${j===i?"active":""}"></i>`).join("")}</div><div class="prologue-click-hint">Kliknij ekran, aby przejść dalej</div></div></div><div class="center muted">${modeIcon(r.config.mode)} ${esc(MODE[r.config.mode].label)}</div>${r.paused?pauseOverlay():""}</main>`;
+  return `<main class="prologue prologue-clickable" data-action="next-prologue"><div class="topbar"><div class="prologue-brand">${logoHTML()}<div class="prologue-mode">${modeIcon(r.config.mode)} ${esc(MODE[r.config.mode].label)}</div></div><div class="row"><button class="btn secondary" data-action="skip-prologue">Pomiń prolog</button><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></div><div class="prologue-main"><div class="prologue-box"><div class="prologue-scene"><img src="assets/scenes/prolog.png" alt="Stado rusza"></div><div class="prologue-text">${esc(PROLOGUE[i])}</div><div class="prologue-dots">${PROLOGUE.map((_,j)=>`<i class="${j===i?"active":""}"></i>`).join("")}</div><div class="prologue-click-hint">Kliknij ekran, aby przejść dalej</div></div></div>${r.paused?pauseOverlay():""}</main>`;
 }
 
 function renderHostGame(r){
@@ -2104,7 +2301,7 @@ function renderHostGame(r){
   const playerData=`data-base-avatar="${playerMetrics.avatar}" data-base-name="${playerMetrics.name}" data-base-type="${playerMetrics.type}" data-base-score="${playerMetrics.score}" data-base-icon="${playerMetrics.icon}"`;
   return `<main class="host-root">
     <header class="host-floating-header">
-      <div class="host-branding"><span class="badge pink host-mode-badge">${modeIcon(r.config.mode)} ${esc(mode.label)}</span>${logoHTML()}</div>
+      <div class="host-branding"><span class="badge pink host-mode-badge">${modeIcon(r.config.mode)} ${esc(mode.label)}</span>${r.config.mode==="quiz"&&r.match?.quizActiveCategoryKey&&c?.type!=="quiz_category_vote"?`<span class="badge quiz-active-category">${esc(QUIZ_CATEGORIES.find(x=>x.key===r.match.quizActiveCategoryKey)?.icon||"🧠")} ${esc(quizCategoryLabel(r.match.quizActiveCategoryKey))} • ${r.match.quizCategoryBlockStart}–${r.match.quizCategoryBlockEnd}</span>`:""}${logoHTML()}</div>
       <div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div>
     </header>
     <section class="host-grid">
@@ -2114,7 +2311,7 @@ function renderHostGame(r){
         ${renderHostQuestion(c,r)}
         <div class="answer-area">${renderHostAnswerArea(c,r)}</div>
         <div class="host-bottom-bar">
-          <div class="host-round-bottom"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span>${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div>
+          <div class="host-round-bottom"><span class="pill">${c?.type==="quiz_category_vote"?`KATEGORIA • PYTANIA ${c.blockStartRound||r.match?.settledRounds+1}–${c.blockEndRound||Math.min(r.match?.plannedRounds||0,(r.match?.settledRounds||0)+5)}`:`RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}`}</span>${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div>
           <div class="host-timer-bottom">${countdownHTML(c)}</div>
           <div class="host-bottom-actions">${renderHostBottomActions(c,r)}</div>
         </div>
@@ -2136,6 +2333,11 @@ function renderHostPlayer(p,c){
 }
 function renderHostQuestion(c,r){
   if(!c)return `<div class="question-card">Przygotowujemy następną rundę…</div>`;
+  if(c.type==="quiz_category_vote"){
+    if(c.phase==="CATEGORY_TIE_BREAK")return `<div class="question-card"><div class="question-meta">🐏 REMIS — BARAN ROZSTRZYGA</div>${esc(playerById(c.categoryRamPlayerId,r)?.name||"Baran")} wybiera kategorię kolejnych pytań.</div>`;
+    if(c.phase==="CATEGORY_RESULT")return `<div class="question-card"><div class="question-meta">🧠 WYBRANA KATEGORIA</div>${esc(quizCategoryLabel(c.winningCategoryKey))}</div>`;
+    return `<div class="question-card"><div class="question-meta">🗳 GŁOSOWANIE KATEGORII</div>Wybierzcie temat pytań ${c.blockStartRound}–${c.blockEndRound}.</div>`;
+  }
   if(c.phase==="NO_QUESTIONS")return `<div class="question-card"><div class="question-meta">Brak pytań</div>Nie ma kolejnego prawidłowego pytania w bazie dla tej konfiguracji.</div>`;
   if(c.phase==="QUESTION_INPUT")return `<div class="question-card"><div class="question-meta">🐏 Baran tej rundy: ${esc(playerById(c.ramPlayerId)?.name||"")}</div>Baran przygotowuje pytanie…</div>`;
   if(!c.questionText)return `<div class="question-card">Przygotowanie rundy…</div>`;
@@ -2144,11 +2346,16 @@ function renderHostQuestion(c,r){
 }
 function renderHostAnswerArea(c,r){
   if(!c)return "";
+  if(c.type==="quiz_category_vote")return renderHostQuizCategoryVote(c,r);
   if(c.phase==="QUESTION_INPUT")return `<div class="card pad center"><h2>🐏 Czekamy na pytanie Barana</h2><p class="muted">Pozostałe Owce widzą ekran oczekiwania.</p></div>`;
   if(c.phase==="ANSWER_INPUT")return `<div class="card pad center"><h2>✍️ Owce przygotowują odpowiedzi</h2><p>${Object.keys(c.answers||{}).length} / ${(c.assignedAuthorIds||[]).length} odpowiedzi gotowych</p>${progressHTML(Object.keys(c.answers||{}).length,(c.assignedAuthorIds||[]).length)}</div>`;
   if(c.phase==="NO_QUESTIONS")return `<div class="card pad center"><button class="btn" data-action="end-game">Zakończ i pokaż finał</button></div>`;
   if(c.type==="which_sheep")return renderWhichGrid(c,r);
   return renderTextOptions(c,r);
+}
+function renderHostQuizCategoryVote(c,r){
+  const keys=c.phase==="CATEGORY_TIE_BREAK"?(c.categoryTieKeys||[]):c.phase==="CATEGORY_RESULT"?[c.winningCategoryKey]:(c.categoryCandidates||[]);
+  return `<div class="quiz-category-vote-grid count-${Math.max(1,keys.length)}">${keys.map(key=>{const cat=QUIZ_CATEGORIES.find(x=>x.key===key),votes=c.categoryTotals?.[key]||0,win=c.winningCategoryKey===key;return `<div class="quiz-category-vote-card ${win?"winner":""}"><div class="quiz-cat-icon">${esc(cat?.icon||"🧠")}</div><div class="quiz-cat-name">${esc(cat?.label||key)}</div>${c.phase==="CATEGORY_RESULT"?`<div class="quiz-cat-score">WYBRANA</div>`:c.phase==="CATEGORY_TIE_BREAK"?`<div class="quiz-cat-score">REMIS • ${votes} gł.</div>`:""}</div>`;}).join("")}</div>`;
 }
 function renderTextOptions(c,r){
   const result=c.settlement;
@@ -2171,9 +2378,15 @@ function renderWhichGrid(c,r){
 function renderHostBottomActions(c,r){
   if(!c)return "";
   if(c.phase==="READY_TO_REVEAL")return `<button class="btn" data-action="show-results">POKAŻ WYNIKI</button>`;
-  if(c.phase==="RESULT")return r.match.settledRounds>=r.match.plannedRounds?`<button class="btn" data-action="show-final">POKAŻ FINAŁ</button>`:`<button class="btn" data-action="next-round">NASTĘPNA RUNDA</button>`;
+  if(c.phase==="RESULT"){
+    if(r.match.settledRounds>=r.match.plannedRounds)return `<button class="btn" data-action="show-final">POKAŻ FINAŁ</button>`;
+    const label=shouldStartQuizCategoryVote(r)?"GŁOSOWANIE":"NASTĘPNA RUNDA";
+    return `<button class="btn" data-action="next-round">${label}</button>`;
+  }
   if(c.phase==="NO_QUESTIONS")return `<button class="btn danger" data-action="end-game">ZAKOŃCZ GRĘ</button>`;
   if(hasBots()){
+    if(c.phase==="CATEGORY_VOTING")return `<button class="btn secondary" data-action="demo-category-votes">🗳 Głosy BOT-ów</button>`;
+    if(c.phase==="CATEGORY_TIE_BREAK"&&playerById(c.categoryRamPlayerId,r)?.isBot)return `<button class="btn secondary" data-action="demo-category-tie">🐏 Wybór BOT-a</button>`;
     if(c.phase==="QUESTION_INPUT")return `<button class="btn secondary" data-action="demo-question">🐏 Pytanie BOT-a</button>`;
     if(c.phase==="ANSWER_INPUT")return `<button class="btn secondary" data-action="demo-answers">✍️ Odpowiedzi BOT-ów</button>`;
     if(c.phase==="VOTING")return `<button class="btn secondary" data-action="demo-votes">🗳 Głosy BOT-ów</button>${c.wolfPlayerId&&playerById(c.wolfPlayerId)?.isBot?`<button class="btn secondary" data-action="demo-hunt">🐺 Ruch Wilka BOT</button>`:""}`;
@@ -2183,6 +2396,12 @@ function renderHostBottomActions(c,r){
 function renderHostStatus(c,r){
   if(!c)return `<div class="status-lines"><div class="status-line status-primary">Przygotowanie rundy…</div></div>`;
   const lines=[];
+  if(c.type==="quiz_category_vote"){
+    if(c.phase==="CATEGORY_VOTING"){const done=Object.keys(c.categoryVotes||{}).length,total=activePlayers(r).length;lines.push(`🗳 Głosy na kategorię: <b>${done}/${total}</b>.`);lines.push(`🧶 Żeton Wełny daje <b>+10 dodatkowych głosów</b>.`);}
+    else if(c.phase==="CATEGORY_TIE_BREAK"){lines.push(`🤝 Remis najlepszych kategorii.`);lines.push(`🐏 <b>${esc(playerById(c.categoryRamPlayerId,r)?.name||"Baran")}</b> wybiera zwycięską kategorię.`);}
+    else if(c.phase==="CATEGORY_RESULT")lines.push(`✅ Wybrano: <b>${esc(quizCategoryLabel(c.winningCategoryKey))}</b>.`);
+    return `<div class="status-lines">${lines.map((x,i)=>`<div class="status-line ${i===0?"status-primary":""}">${x}</div>`).join("")}</div>`;
+  }
   if(c.phase==="QUESTION_INPUT"){
     lines.push(`🐏 <b>${esc(playerById(c.ramPlayerId)?.name||"Baran")}</b> przygotowuje pytanie.`);
   }else if(c.phase==="ANSWER_INPUT"){
@@ -2231,7 +2450,10 @@ function renderHistory(r){
 }
 function renderScoreRules(r){
   const c=currentAttempt(r);
-  if(r.config.mode==="quiz")return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>✅ +2</b><span>DOBRA</span></div><div class="score-rule"><b>❌ 0</b><span>BŁĄD</span></div><div class="score-rule"><b>🧶 ×2</b><span>= +4</span></div><div class="score-rule"><b>🧶 +1</b><span>FINAŁ / SZT.</span></div></div>`;
+  if(r.config.mode==="quiz"){
+    if(c?.type==="quiz_category_vote")return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🗳 1</b><span>ZWYKŁY GŁOS</span></div><div class="score-rule"><b>🧶 +10</b><span>GŁOSÓW</span></div><div class="score-rule"><b>🤝 🐏</b><span>REMIS = BARAN</span></div><div class="score-rule"><b>🧶 +1</b><span>FINAŁ</span></div></div>`;
+    return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>✅ +2</b><span>DOBRA</span></div><div class="score-rule"><b>❌ 0</b><span>BŁĄD</span></div><div class="score-rule"><b>🧶 ×2</b><span>= +4</span></div><div class="score-rule"><b>🧶 +1</b><span>FINAŁ / SZT.</span></div></div>`;
+  }
   if(c?.type==="target")return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🔎 +1</b><span>OWCA POD LUPĄ</span></div><div class="score-rule"><b>🎯 +2</b><span>TRAFIENIE</span></div><div class="score-rule"><b>❌ 0</b><span>PUDŁO</span></div><div class="score-rule"><b>🧶 ×2</b><span>= +4</span></div></div>`;
   return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🐑 +2</b><span>STADO</span></div><div class="score-rule"><b>🤝 +1</b><span>REMIS</span></div><div class="score-rule"><b>🖤 +3</b><span>CZARNA</span></div><div class="score-rule"><b>🧶 ×2</b><span>TWÓJ GŁOS</span></div>${r.config.mode!=="warmup"&&c?.type!=="which_sheep"?`<div class="score-rule"><b>✍️ +1 🧶</b><span>AUTOR</span></div>`:""}${r.config.wolfEnabled?`<div class="score-rule"><b>🐺 +1/−1</b><span>CEL −2</span></div>`:""}</div>`;
 }
@@ -2240,13 +2462,24 @@ function progressHTML(done,total){const pct=total?Math.round(done/total*100):0;r
 function renderHostFinal(r){
   const f=r.match?.finalResult;if(!f)return `<main class="app-shell">${logoHTML()}<h1>Podsumowanie…</h1></main>`;
   if(f.noWinner)return `<main class="app-shell"><div class="topbar">${logoHTML()}<button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div><section class="card pad center"><h1 class="section-title">Gra zakończona przed rozpoczęciem</h1><p>Nie rozegrano żadnej punktowanej rundy.</p><div class="row" style="justify-content:center"><button class="btn" data-action="new-game">Nowa gra</button><button class="btn secondary" data-action="close-room">Powrót do menu</button></div></section></main>`;
-  const levels=[...new Set(f.rankings.map(x=>x.place))].filter(x=>x<=3);
+  const winners=f.rankings.filter(x=>x.place===1);
+  const runnerLevels=[2,3].filter(place=>f.rankings.some(x=>x.place===place));
   const finalCount=f.rankings.length;
   const finalMetrics=finalCount<=4?{avatar:64,podium:88,name:20,score:21}:finalCount<=6?{avatar:56,podium:78,name:18,score:19}:finalCount<=8?{avatar:50,podium:70,name:17,score:18}:finalCount<=10?{avatar:44,podium:62,name:16,score:17}:{avatar:38,podium:56,name:15,score:16};
   const finalVars=`--final-avatar:${finalMetrics.avatar}px;--podium-avatar:${finalMetrics.podium}px;--final-name:${finalMetrics.name}px;--final-score:${finalMetrics.score}px`;
+  const winnerLabel=winners.length===1?"ZWYCIĘZCA GRY":"ZWYCIĘZCY GRY";
+  const winnerPlace=winners.length===1?"1. MIEJSCE":"1. MIEJSCE • REMIS";
+  const winnerPeople=winners.map(x=>{const p=playerById(x.playerId,r);return `<div class="winner-person">${sheepImg(p)}<div class="winner-copy"><b class="winner-name">${esc(p.name)}</b><span class="winner-type">${esc(sheepType(p))}</span><strong class="winner-score">${x.points} pkt</strong></div></div>`;}).join("");
+  const runnerHTML=runnerLevels.map(place=>{const group=f.rankings.filter(x=>x.place===place);return `<div class="podium-level runner-place place-${place} ${group.length>1?"tie":"single"}"><h3 class="podium-title"><span class="podium-medal">${medal(place)}</span><span>${place}. miejsce</span></h3><div class="podium-players">${group.map(x=>{const p=playerById(x.playerId,r);return `<div class="podium-person">${sheepImg(p)}<div class="podium-copy"><b>${esc(p.name)}</b><strong>${p.points} pkt</strong></div></div>`;}).join("")}</div></div>`;}).join("");
   return `<main class="final-host" style="${finalVars}"><header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">🏆 FINAŁ STADA</span><span class="badge pink">${esc(MODE[r.config.mode].label)}</span></div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
-    <section class="podium">${levels.map(place=>{const group=f.rankings.filter(x=>x.place===place);return `<div class="podium-level ${place===1?"first":""} ${group.length>1?"tie":"single"}"><h3 class="podium-title"><span class="podium-medal">${medal(place)}</span><span>${place}. miejsce</span></h3><div class="podium-players">${group.map(x=>{const p=playerById(x.playerId,r);return `<div class="podium-person">${sheepImg(p)}<div class="podium-copy"><b>${esc(p.name)}</b><strong>${p.points} pkt</strong></div></div>`;}).join("")}</div></div>`;}).join("")}</section>
-    <section class="final-main"><div class="card pad final-awards-card"><h2>Wyróżnienia</h2><div class="awards-grid ${r.config.mode==="quiz"?"quiz-awards":""}">${r.config.mode==="quiz"?`${awardCard(r,"🧠 Mózg Stada",f.awards.quiz||[],"Najwięcej poprawnych odpowiedzi")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej grała Żetonem")}`:`${awardCard(r,"🐑 Owca Stada",f.awards.herd,"Najczęściej z największym Stadem")}${awardCard(r,"🖤 Czarna Owca",f.awards.black,"Najczęściej samotnie")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej grała Żetonem")}`}</div></div><div class="card pad final-ranking-card"><h2>Klasyfikacja końcowa</h2><div class="ranking">${f.rankings.map(x=>{const p=playerById(x.playerId,r);return `<div class="ranking-row"><b class="rank-place">${x.place}</b>${sheepImg(p)}<div class="ranking-copy"><b class="ranking-name">${esc(p.name)}</b><span class="ranking-type">${esc(sheepType(p))}</span><strong class="ranking-score">${x.points} pkt</strong></div></div>`;}).join("")}</div></div></section>
+    <section class="final-top-stage">
+      <div class="winner-hero winner-count-${Math.min(winners.length,5)} ${winners.length>1?"winner-tie":"winner-single"}">
+        <div class="winner-heading"><span class="winner-crown">🏆</span><div><div class="winner-kicker">${winnerLabel}</div><div class="winner-place">${winnerPlace}</div></div></div>
+        <div class="winner-people">${winnerPeople}</div>
+      </div>
+      ${runnerHTML?`<div class="runner-podium">${runnerHTML}</div>`:""}
+    </section>
+    <section class="final-main"><div class="card pad final-awards-card"><h2>Wyróżnienia</h2><div class="awards-grid ${r.config.mode==="quiz"?"quiz-awards":""}">${r.config.mode==="quiz"?`${awardCard(r,"🧠 Mózg Stada",f.awards.quiz||[],"Najwięcej poprawnych odpowiedzi")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej grała Żetonem")}`:`${awardCard(r,"🐑 Owca Stada",f.awards.herd,"Najczęściej z największym Stadem")}${awardCard(r,"🖤 Czarna Owca",f.awards.black,"Najczęściej samotnie")}${awardCard(r,"🧶 Owca All-In",f.awards.allIn,"Najczęściej grała Żetonem")}`}</div></div><div class="card pad final-ranking-card"><h2>Klasyfikacja końcowa</h2><div class="ranking">${f.rankings.map(x=>{const p=playerById(x.playerId,r);return `<div class="ranking-row ${x.place===1?"ranking-winner":""}"><b class="rank-place">${x.place}</b>${sheepImg(p)}<div class="ranking-copy"><b class="ranking-name">${esc(p.name)}</b><span class="ranking-type">${esc(sheepType(p))}</span><strong class="ranking-score">${x.points} pkt</strong></div></div>`;}).join("")}</div></div></section>
     <div class="final-actions"><div class="row"><button class="btn" data-action="replay">↻ Zagraj ponownie</button><button class="btn secondary" data-action="new-game">⚙ Nowa gra</button><button class="btn ghost" data-action="close-room">⌂ Powrót do menu</button></div>${versionHTML()}</div>${confettiHTML()}</main>`;
 }
 function awardCard(r,title,ids,desc){return `<div class="award-card"><h3>${title}</h3><div class="award-people">${ids.length?ids.map(id=>{const p=playerById(id,r);return `<div class="award-person">${sheepImg(p)}<div><b>${esc(p?.name||"")}</b><span>${esc(sheepType(p))}</span></div></div>`;}).join(""):`<div class="muted">Nie przyznano</div>`}</div><p>${esc(desc)}</p></div>`;}
@@ -2287,7 +2520,9 @@ function renderPhoneLobbyWait(s){return renderPhoneWait("Jesteś w Stadzie!","Cz
 function renderPhoneWait(title,text,img,extra=""){return `<div class="phone-wait"><h1>${esc(title)}</h1><p>${esc(text)}</p>${img?`<img src="${escAttr(img)}" alt="Czekające Owce">`:""}<div class="wait-dots"><i></i><i></i><i></i></div>${extra?`<b>${esc(extra)}</b>`:""}</div>`;}
 function renderPhoneRound(s){
   const c=s.match?.current;if(!c)return renderPhoneWait("Przygotowanie rundy…","Spójrz na ekran główny.","assets/phone/czekatel.png");
-  const rp=`<div class="phone-round-head"><div class="round-pill">RUNDA ${c.number}/${s.match.plannedRounds}</div>${countdownHTML(c,true)}</div>`;
+  if(c.type==="quiz_category_vote")return renderPhoneQuizCategoryVote(c,s);
+  const categoryBadge=s.config.mode==="quiz"&&s.match.quizActiveCategoryKey?`<div class="phone-quiz-category">${esc(QUIZ_CATEGORIES.find(x=>x.key===s.match.quizActiveCategoryKey)?.icon||"🧠")} <b>${esc(quizCategoryLabel(s.match.quizActiveCategoryKey))}</b> • pytania ${s.match.quizCategoryBlockStart}–${s.match.quizCategoryBlockEnd}</div>`:"";
+  const rp=`${categoryBadge}<div class="phone-round-head"><div class="round-pill">RUNDA ${c.number}/${s.match.plannedRounds}</div>${countdownHTML(c,true)}</div>`;
   if(c.phase==="QUESTION_INPUT"){
     if(c.isRam)return rp+renderQuestionAuthor(c,s);
     return rp+renderPhoneWait("Baran układa pytanie…","Czekasz na przygotowanie rundy.","assets/phone/czekatel.png");
@@ -2305,6 +2540,20 @@ function renderPhoneRound(s){
   if(c.phase==="RESULT")return rp+renderPhoneRoundResult(c,s);
   if(c.phase==="NO_QUESTIONS")return rp+renderPhoneWait("Brak kolejnego pytania","Prowadzący zdecyduje, co dalej.","assets/phone/czekatel.png");
   return rp+renderPhoneWait("Czekamy na przygotowanie rundy…","Spójrz na ekran główny.","assets/phone/czekatel.png");
+}
+function renderPhoneQuizCategoryVote(c,s){
+  const d=runtime.player.drafts,head=`<div class="phone-round-head"><div class="round-pill">KATEGORIA • ${c.blockStartRound}–${c.blockEndRound}</div>${countdownHTML(c,true)}</div>`;
+  if(c.phase==="CATEGORY_VOTING"){
+    if(c.myCategoryVote)return head+renderPhoneWait("Głos zapisany!",`Czekamy na pozostałe Owce: ${c.categoryVotingProgress.done}/${c.categoryVotingProgress.total}.`,"assets/phone/czekatel.png");
+    const available=s.self.tokens>0,selected=available&&d.categoryUseToken;
+    return `${head}<div class="category-phone-box"><h2>🗳 Wybierz kategorię</h2><p>Pytania ${c.blockStartRound}–${c.blockEndRound} będą z kategorii wybranej przez Stado.</p><div class="phone-category-grid">${(c.categoryCandidates||[]).map(key=>{const cat=QUIZ_CATEGORIES.find(x=>x.key===key);return `<button class="phone-category-choice ${d.categoryKey===key?"selected":""}" data-action="select-category-vote" data-id="${escAttr(key)}"><span>${esc(cat?.icon||"🧠")}</span><b>${esc(cat?.label||key)}</b></button>`;}).join("")}</div><div class="token-box category-token ${selected?"active":""}"><div class="token-toggle"><div><b>🧶 Mocny głos: +10</b><div class="small">${selected?"Ten wybór ma 11 głosów łącznie (1 zwykły + 10 z Żetonu).":"Możesz zachować Żeton do ×2 za odpowiedź albo +1 pkt w finale."}</div></div><label class="switch"><input type="checkbox" data-category-token-toggle ${selected?"checked":""} ${available?"":"disabled"}><span></span></label></div></div><div class="sticky-action"><button class="btn" data-action="submit-category-vote" ${d.categoryKey?"":"disabled"}>ZATWIERDŹ KATEGORIĘ</button></div></div>`;
+  }
+  if(c.phase==="CATEGORY_TIE_BREAK"){
+    if(!c.isCategoryRam)return head+renderPhoneWait("Remis kategorii",`${s.players.find(p=>p.playerId===c.categoryRamPlayerId)?.name||"Baran"} rozstrzyga wybór.`,"assets/phone/czekatel.png");
+    return `${head}<div class="category-phone-box"><h2>🐏 Jesteś Baranem!</h2><p>Najlepsze kategorie zremisowały. Wybierz jedną z nich.</p><div class="phone-category-grid">${(c.categoryTieKeys||[]).map(key=>{const cat=QUIZ_CATEGORIES.find(x=>x.key===key);return `<button class="phone-category-choice ${d.categoryTieKey===key?"selected":""}" data-action="select-category-tie" data-id="${escAttr(key)}"><span>${esc(cat?.icon||"🧠")}</span><b>${esc(cat?.label||key)}</b></button>`;}).join("")}</div><div class="sticky-action"><button class="btn yellow" data-action="submit-category-tie" ${d.categoryTieKey?"":"disabled"}>WYBIERAM</button></div></div>`;
+  }
+  if(c.phase==="CATEGORY_RESULT")return head+renderPhoneWait("Wybrana kategoria",quizCategoryLabel(c.winningCategoryKey),"assets/phone/czekatel.png");
+  return head+renderPhoneWait("Wybieramy kategorię…","Spójrz na ekran główny.","assets/phone/czekatel.png");
 }
 function questionWritingGuide(type){
   if(type==="which_sheep")return `<div class="writing-guide"><b>💡 Jak napisać dobre „Która Owca?”</b><div class="small">Krótka, konkretna sytuacja, w której naturalnie da się wskazać jedną osobę ze Stada.</div><div class="writing-examples"><span>„Kto pierwszy zasnąłby na własnej imprezie?”</span><span>„Kto kupiłby coś kompletnie niepotrzebnego?”</span><span>„Kto zniknąłby bez pożegnania?”</span></div></div>`;
@@ -2427,29 +2676,54 @@ function renderSettingsModal(){
   return `<div class="modal card settings-modal"><h2>⚙ Ustawienia <span class="app-version">v${APP_VERSION}</span></h2>
     <div class="settings-section music-settings-section">
       <div class="config-label-row"><label class="form-label">🎵 Muzyka</label>${infoTip("music","Jak działa wybór muzyki?")}</div>
-      <div class="music-choice-row"><select class="select" data-music-track>${musicOptions}</select><button class="btn cyan music-play-btn" data-action="music-play">▶ Odtwórz</button></div>
-      <div class="spread"><label class="form-label">Głośność muzyki</label><span class="settings-track-badge">${volume}%</span></div><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1">
+      <div class="music-choice-row"><select class="select" data-music-track>${musicOptions}</select><button class="btn secondary music-default-btn" data-action="music-default">↺ Domyślna</button></div>
+      <div class="spread"><label class="form-label">Głośność muzyki</label><span class="settings-track-badge" data-music-volume-value>${volume}%</span></div><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1">
       <label class="row settings-mute"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label>
-      <div class="countdown-sound-settings"><div class="spread"><span class="setting-title">⏱ Piknięcie ostatnich 5 sekund ${infoTip("countdownTick","Jak działa sygnał końcówki?")}</span><span class="switch"><input type="checkbox" data-tick-enabled ${runtime.audio.tickEnabled?"checked":""}><span></span></span></div><div class="spread tick-volume-label"><span>Głośność piknięcia</span><b data-tick-volume-value>${Math.round(runtime.audio.tickVolume*100)}%</b></div><input type="range" min="0" max="100" step="5" value="${Math.round(runtime.audio.tickVolume*100)}" data-tick-volume="1"></div>
+      <div class="countdown-sound-settings"><div class="spread"><span class="setting-title">⏱ Piknięcie ostatnich 5 sekund ${infoTip("countdownTick","Jak działa sygnał końcówki?")}</span><label class="switch" aria-label="Włącz lub wyłącz piknięcia stopera"><input type="checkbox" data-tick-enabled ${runtime.audio.tickEnabled?"checked":""}><span></span></label></div><div class="spread tick-volume-label"><span>Głośność piknięcia</span><b data-tick-volume-value>${Math.round(runtime.audio.tickVolume*100)}%</b></div><input type="range" min="0" max="100" step="5" value="${Math.round(runtime.audio.tickVolume*100)}" data-tick-volume="1"></div>
+      <div class="row wrap audio-reset-row"><button class="btn ghost" data-action="audio-volume-reset">↺ DOMYŚLNE GŁOŚNOŚCI</button><span class="small muted">Muzyka 35% • piknięcie 100%</span></div>
       <div class="row wrap settings-tools"><button class="btn secondary" data-action="open-graphics-settings">🎨 USTAWIENIA GRAFIKI</button>${infoTip("visualSettings","Co można zmienić?")}</div>
     </div>
     ${r?`<div class="info-item settings-room"><b>Pokój ${esc(r.roomCode)}</b><div id="settingsQR" data-qr="${escAttr(joinURL(r))}" class="settings-qr"></div><div class="small center muted">Zeskanuj, aby wrócić do pokoju.</div></div><div class="manage-list">${activePlayers(r).map(p=>`<div class="manage-row">${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))} • ${p.connected||p.isBot?"online":"offline"}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}">Usuń</button></div>`).join("")}</div>`:""}
     <div class="modal-actions">${r&&["ROUND","PROLOGUE"].includes(r.status)?`<button class="btn secondary" data-action="pause">${r.paused?"Wznów":"Pauza"}</button>`:""}${r&&r.status==="ROUND"&&r.match?.current&&!r.match.current.settlement?`<button class="btn secondary" data-action="abort-round">Pomiń pytanie</button>`:""}${r?`<button class="btn yellow" data-action="settings-new-game">↻ USTAW GRĘ OD NOWA</button>`:""}${r?`<button class="btn danger" data-action="settings-exit-menu">WYJDŹ DO MENU GŁÓWNEGO</button>`:""}<button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
 }
+function currentVisualScreen(){
+  const r=runtime.host.room;
+  if(!r)return "config";
+  if(r.status==="CONFIG")return "config";
+  if(r.status==="LOBBY")return "lobby";
+  if(r.status==="PROLOGUE")return "prologue";
+  if(r.status==="FINAL")return "final";
+  return "round";
+}
+function visualDefsForScreen(screen){
+  if(screen==="config")return [["configLeft","Lewa strona ustawień"],["configRight","Prawa strona ustawień"]];
+  if(screen==="lobby")return [["lobby","Lobby / dołączanie graczy"]];
+  if(screen==="prologue")return [["prologue","Prolog"]];
+  if(screen==="final")return [["final","Ekran finałowy"]];
+  return [["players","Owce, imiona i punkty po lewej"],["question","Pytanie"],["answers","Odpowiedzi i litery"],["info","Panel: Teraz"],["history","Panel: Ostatnia runda"],["points","Panel: Punkty"],["timer","Stoper"]];
+}
+function resetCurrentVisualScreen(){
+  const screen=runtime.modal?.screen||currentVisualScreen();
+  visualDefsForScreen(screen).forEach(([key])=>runtime.visual[key]=VISUAL_DEFAULTS[key]);
+}
 function renderGraphicsSettingsModal(){
-  const defs=[
-    ["menu","Menu / konfiguracja"],
-    ["players","Owce, imiona i punkty po lewej"],
-    ["question","Pytanie w głównym oknie"],
-    ["answers","Odpowiedzi i litery"],
-    ["info","Panel: Teraz"],
-    ["history","Panel: Ostatnia runda"],
-    ["points","Panel: Punkty"],
-    ["timer","Stoper w trakcie rundy"]
-  ];
-  return `<div class="modal card visual-settings-modal"><div class="visual-settings-heading"><h2>🎨 Ustawienia grafiki</h2>${infoTip("visualSettings","Jak działają suwaki grafiki?")}</div><div class="visual-sliders">${defs.map(([key,label])=>{const rg=VISUAL_RANGES[key]||{min:70,max:140,step:5};return `<label class="visual-slider-row"><div><b>${esc(label)}</b><span data-visual-value="${key}">${runtime.visual[key]}%</span></div><input type="range" min="${rg.min}" max="${rg.max}" step="${rg.step}" value="${runtime.visual[key]}" data-visual-setting="${key}"></label>`;}).join("")}</div><div class="modal-actions"><button class="btn secondary" data-action="visual-reset">Przywróć domyślne</button><button class="btn" data-action="close-modal">GOTOWE</button></div></div>`;
+  const screen=runtime.modal?.screen||currentVisualScreen(),defs=visualDefsForScreen(screen);
+  const device=DEVICE_PROFILES[runtime.visual.device]?runtime.visual.device:"auto";
+  const deviceOptions=Object.entries(DEVICE_PROFILES).map(([key,d])=>`<option value="${key}" ${device===key?"selected":""}>${esc(d.label)} — ${esc(d.hint)}</option>`).join("");
+  const screenLabel={config:"ustawienia gry",lobby:"lobby",prologue:"prolog",round:"rozgrywka",final:"finał"}[screen]||screen;
+  return `<div class="modal card visual-settings-modal"><div class="visual-settings-heading"><div><h2>🎨 Ustawienia grafiki</h2><div class="small muted">Ekran: <b>${esc(screenLabel)}</b></div></div>${infoTip("visualSettings","Jak działają ustawienia grafiki?")}</div><div class="device-profile-box"><div class="spread"><b>📱 Dopasowanie do urządzenia</b><span class="device-profile-resolved">${esc(resolvedDeviceProfileLabel())}</span></div><select class="select" data-device-profile>${deviceOptions}</select><div class="small muted">Profil zmienia bazową skalę i zwartość układu. Tryb Automatycznie reaguje również na zmianę wielkości okna.</div></div><div class="visual-sliders">${defs.map(([key,label])=>{const rg=VISUAL_RANGES[key]||{min:70,max:140,step:5};return `<label class="visual-slider-row"><div><b>${esc(label)}</b><span data-visual-value="${key}">${runtime.visual[key]}%</span></div><input type="range" min="${rg.min}" max="${rg.max}" step="${rg.step}" value="${runtime.visual[key]}" data-visual-setting="${key}"></label>`;}).join("")}</div><div class="modal-actions"><button class="btn secondary" data-action="visual-reset">Przywróć domyślne dla tego ekranu</button><button class="btn" data-action="close-modal">GOTOWE</button></div></div>`;
 }
 function afterModalRender(){document.querySelectorAll("[data-qr]").forEach(renderQRNode);}
+function showFloatingTooltip(source){
+  hideFloatingTooltip();
+  const text=source?.dataset?.tooltip;if(!text)return;
+  const tip=document.createElement("div");tip.id="floating-info-tooltip";tip.className="floating-info-tooltip";tip.textContent=text;document.body.appendChild(tip);
+  const r=source.getBoundingClientRect(),pad=10,tw=Math.min(tip.offsetWidth,Math.max(220,innerWidth-pad*2)),th=tip.offsetHeight;
+  let left=r.left+r.width/2-tw/2;left=Math.max(pad,Math.min(left,innerWidth-tw-pad));
+  let top=r.top-th-10;if(top<pad)top=Math.min(innerHeight-th-pad,r.bottom+10);
+  tip.style.left=`${Math.round(left)}px`;tip.style.top=`${Math.round(Math.max(pad,top))}px`;
+}
+function hideFloatingTooltip(){document.getElementById("floating-info-tooltip")?.remove();}
 
 function pauseOverlay(phone=false){return `<div class="pause-overlay"><div class="overlay-box"><h1>⏸ Gra wstrzymana</h1><p>${phone?"Prowadzący zatrzymał grę. Twoje wpisane, ale niezatwierdzone treści pozostają na tym urządzeniu.":"Wznów grę w Ustawieniach."}</p></div></div>`;}
 function connectionOverlay(){return `<div class="connection-overlay"><div class="overlay-box"><h1>Łączenie ze Stadem…</h1><p>Nie wykonujemy żadnych ruchów bez potwierdzenia hosta.</p><button class="btn" data-action="player-reconnect">Połącz ponownie</button></div></div>`;}
@@ -2533,29 +2807,45 @@ function renderQRNode(el){
 }
 function loadVisualPrefs(){
   const saved=readJSON(VISUAL_STORAGE_KEY)||{};
-  const out={...VISUAL_DEFAULTS};
+  const out={...VISUAL_DEFAULTS,device:DEVICE_PROFILES[saved.device]?saved.device:"auto"};
+  const legacyMenu=Number.isFinite(+saved.menu)?+saved.menu:null;
   if(Number.isFinite(+saved.side)){
     for(const k of ["info","history","points"])if(!Number.isFinite(+saved[k]))saved[k]=+saved.side;
   }
-  Object.keys(out).forEach(k=>{const rg=VISUAL_RANGES[k]||{min:70,max:140};if(Number.isFinite(+saved[k]))out[k]=clamp(+saved[k],rg.min,rg.max);});
+  if(legacyMenu!==null){if(!Number.isFinite(+saved.configLeft))saved.configLeft=legacyMenu;if(!Number.isFinite(+saved.configRight))saved.configRight=legacyMenu;}
+  Object.keys(VISUAL_DEFAULTS).forEach(k=>{const rg=VISUAL_RANGES[k]||{min:70,max:140};if(Number.isFinite(+saved[k]))out[k]=clamp(+saved[k],rg.min,rg.max);});
   return out;
 }
 function saveVisualPrefs(){try{localStorage.setItem(VISUAL_STORAGE_KEY,JSON.stringify(runtime.visual));}catch{}}
+function resolvedDeviceProfile(){
+  const chosen=runtime.visual?.device||"auto";if(chosen!=="auto"&&DEVICE_PROFILES[chosen])return chosen;
+  const w=Math.max(1,innerWidth||1024),h=Math.max(1,innerHeight||768),long=Math.max(w,h),short=Math.min(w,h);
+  if(long<=900||short<=460)return "phone";
+  if(long<=1200||short<=700)return "tablet";
+  if(long<=1750)return "laptop";
+  return "tv";
+}
+function resolvedDeviceProfileLabel(){const p=resolvedDeviceProfile();return DEVICE_PROFILES[p]?.label||p;}
+function deviceScaleFactor(){return {phone:.78,tablet:.90,laptop:1,tv:1.08}[resolvedDeviceProfile()]||1;}
 function applyVisualSettings(){
-  const v=runtime.visual||VISUAL_DEFAULTS,root=document.documentElement;
-  const m=v.menu/100,q=v.question/100,a=v.answers/100,info=v.info/100,history=v.history/100,points=v.points/100,timer=v.timer/100;
-  root.style.setProperty("--ui-menu-title",`${Math.round(34*m)}px`);
-  root.style.setProperty("--ui-menu-subhead",`${Math.round(19*m)}px`);
-  root.style.setProperty("--ui-menu-label",`${Math.round(16*m)}px`);
-  root.style.setProperty("--ui-menu-mode",`${(15.5*m).toFixed(1)}px`);
-  root.style.setProperty("--ui-menu-kicker",`${(11*m).toFixed(1)}px`);
-  root.style.setProperty("--ui-menu-small",`${Math.max(9,Math.round(10.5*m))}px`);
+  const v=runtime.visual||VISUAL_DEFAULTS,root=document.documentElement,d=deviceScaleFactor();
+  root.dataset.deviceProfile=resolvedDeviceProfile();
+  const ml=(v.configLeft/100)*d,mr=(v.configRight/100)*d,q=(v.question/100)*d,a=(v.answers/100)*d,info=(v.info/100)*d,history=(v.history/100)*d,points=(v.points/100)*d,timer=(v.timer/100)*d;
+  root.style.setProperty("--ui-menu-title",`${Math.round(34*ml)}px`);
+  root.style.setProperty("--ui-menu-subhead",`${Math.round(19*ml)}px`);
+  root.style.setProperty("--ui-menu-label",`${Math.round(16*ml)}px`);
+  root.style.setProperty("--ui-menu-mode",`${(15.5*ml).toFixed(1)}px`);
+  root.style.setProperty("--ui-menu-kicker",`${(11*ml).toFixed(1)}px`);
+  root.style.setProperty("--ui-menu-small",`${Math.max(8,Math.round(10.5*ml))}px`);
+  root.style.setProperty("--ui-menu-right-title",`${Math.round(34*mr)}px`);
+  root.style.setProperty("--ui-menu-right-subhead",`${Math.round(19*mr)}px`);
+  root.style.setProperty("--ui-menu-right-text",`${Math.round(14*mr)}px`);
   root.style.setProperty("--ui-question-min",`${Math.round(17*q)}px`);
   root.style.setProperty("--ui-question-max",`${Math.round(31*q)}px`);
-  root.style.setProperty("--ui-answer-min",`${Math.max(9,Math.round(11*a))}px`);
+  root.style.setProperty("--ui-answer-min",`${Math.max(8,Math.round(11*a))}px`);
   root.style.setProperty("--ui-answer-max",`${Math.round(20*a)}px`);
-  root.style.setProperty("--ui-answer-letter-min",`${Math.max(11,Math.round(13*a))}px`);
-  root.style.setProperty("--ui-answer-letter-max",`${Math.round(21*a)}px`);
+  root.style.setProperty("--ui-answer-letter-min",`${Math.max(9,Math.round(12*a))}px`);
+  root.style.setProperty("--ui-answer-letter-max",`${Math.round(19*a)}px`);
   root.style.setProperty("--ui-info-title",`${Math.round(20*info)}px`);
   root.style.setProperty("--ui-info-text",`${Math.round(15*info)}px`);
   root.style.setProperty("--ui-history-title",`${Math.round(20*history)}px`);
@@ -2564,23 +2854,39 @@ function applyVisualSettings(){
   root.style.setProperty("--ui-points-score",`${Math.round(18*points)}px`);
   root.style.setProperty("--ui-points-small",`${Math.round(11*points)}px`);
   root.style.setProperty("--ui-timer-size",`${Math.round(25*timer)}px`);
+  const lobby=(v.lobby/100)*d,prologue=(v.prologue/100)*d,final=(v.final/100)*d;
+  root.style.setProperty("--ui-lobby-title",`${Math.round(34*lobby)}px`);
+  root.style.setProperty("--ui-lobby-code",`${Math.round(70*lobby)}px`);
+  root.style.setProperty("--ui-lobby-name",`${Math.round(17*lobby)}px`);
+  root.style.setProperty("--ui-lobby-small",`${Math.max(9,Math.round(12*lobby))}px`);
+  root.style.setProperty("--ui-prologue-text",`${Math.round(34*prologue)}px`);
+  root.style.setProperty("--ui-prologue-mode",`${Math.round(17*prologue)}px`);
+  root.style.setProperty("--ui-prologue-hint",`${Math.round(15*prologue)}px`);
+  root.style.setProperty("--ui-final-title",`${Math.round(34*final)}px`);
+  root.style.setProperty("--ui-final-subtitle",`${Math.round(25*final)}px`);
+  root.style.setProperty("--ui-final-text",`${Math.round(17*final)}px`);
 }
 function applyVisualSettingsToDOM(){
   const list=document.querySelector(".host-player-list");
   if(list?.dataset.baseAvatar){
-    const scale=(runtime.visual?.players||100)/100;
+    const scale=(runtime.visual?.players||100)/100*deviceScaleFactor();
     const set=(name,key,dec=0)=>{const n=parseFloat(list.dataset[key]);if(Number.isFinite(n))list.style.setProperty(name,`${dec?(n*scale).toFixed(dec):Math.round(n*scale)}px`);};
     set("--host-avatar","baseAvatar");set("--host-name","baseName",1);set("--host-type","baseType",1);set("--host-score","baseScore",1);set("--host-icon","baseIcon",1);
   }
 }
-
+function resetPresentationPrefs(){
+  try{localStorage.removeItem(VISUAL_STORAGE_KEY);localStorage.removeItem(AUDIO_STORAGE_KEY);}catch{}
+  runtime.visual={...VISUAL_DEFAULTS,device:"auto"};
+  runtime.audio.manualTrack=0;runtime.audio.volume=.35;runtime.audio.muted=false;runtime.audio.tickEnabled=true;runtime.audio.tickVolume=1;runtime.audio.lastTickKey="";
+  syncAudioElements();applyVisualSettings();
+}
 function loadAudioPrefs(){
   const a=readJSON(AUDIO_STORAGE_KEY);if(a){
     runtime.audio.volume=typeof a.volume==="number"?clamp(a.volume,0,1):.35;
     runtime.audio.muted=!!a.muted;
     runtime.audio.manualTrack=clamp(+(a.manualTrack||0),0,AUDIO_TRACK_COUNT);
     runtime.audio.tickEnabled=a.tickEnabled!==false;
-    runtime.audio.tickVolume=typeof a.tickVolume==="number"?clamp(a.tickVolume,0,1):.18;
+    runtime.audio.tickVolume=a.prefsVersion===AUDIO_PREFS_VERSION&&typeof a.tickVolume==="number"?clamp(a.tickVolume,0,1):1;
   }
   syncAudioElements();
 }
@@ -2588,7 +2894,7 @@ function syncAudioElements(){for(let i=1;i<=AUDIO_TRACK_COUNT;i++){const el=docu
 function setAudioVolume(v){runtime.audio.volume=clamp(v,0,1);syncAudioElements();saveAudioPrefs();}
 function setTickVolume(v){runtime.audio.tickVolume=clamp(v,0,1);saveAudioPrefs();}
 function setMuted(v){runtime.audio.muted=!!v;syncAudioElements();saveAudioPrefs();render();}
-function saveAudioPrefs(){try{localStorage.setItem(AUDIO_STORAGE_KEY,JSON.stringify({volume:runtime.audio.volume,muted:runtime.audio.muted,manualTrack:runtime.audio.manualTrack,tickEnabled:runtime.audio.tickEnabled,tickVolume:runtime.audio.tickVolume}));}catch{}}
+function saveAudioPrefs(){try{localStorage.setItem(AUDIO_STORAGE_KEY,JSON.stringify({prefsVersion:AUDIO_PREFS_VERSION,volume:runtime.audio.volume,muted:runtime.audio.muted,manualTrack:runtime.audio.manualTrack,tickEnabled:runtime.audio.tickEnabled,tickVolume:runtime.audio.tickVolume}));}catch{}}
 function currentDefaultMusicTrack(){
   const r=runtime.host.room;
   if(r?.status==="PROLOGUE")return 1;
@@ -2642,11 +2948,29 @@ function playCountdownTick(left){
   if(runtime.role!=="host"||!runtime.audio.tickEnabled||runtime.audio.tickVolume<=0||left<1||left>5)return;
   const ctx=unlockTickAudio();if(!ctx||ctx.state!=="running")return;
   try{
-    const osc=ctx.createOscillator(),gain=ctx.createGain(),now=ctx.currentTime;
-    osc.type="sine";osc.frequency.setValueAtTime(left===1?920:720,now);
-    const amp=Math.max(.002,.065*runtime.audio.tickVolume);
-    gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(amp,now+.008);gain.gain.exponentialRampToValueAtTime(.0001,now+.07);
-    osc.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.075);
+    const now=ctx.currentTime;
+    // Wyraźny, krótki sygnał, który przebija się przez muzykę bez bycia długim alarmem.
+    // Dwa oscylatory dają czytelniejszy atak także na małych głośnikach telefonu/tabletu.
+    const master=ctx.createGain();
+    const compressor=ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-20,now);
+    compressor.knee.setValueAtTime(12,now);
+    compressor.ratio.setValueAtTime(5,now);
+    compressor.attack.setValueAtTime(.002,now);
+    compressor.release.setValueAtTime(.08,now);
+    const amp=Math.max(.01,.42*runtime.audio.tickVolume);
+    master.gain.setValueAtTime(.0001,now);
+    master.gain.exponentialRampToValueAtTime(amp,now+.006);
+    master.gain.exponentialRampToValueAtTime(Math.max(.004,amp*.32),now+.055);
+    master.gain.exponentialRampToValueAtTime(.0001,now+.14);
+    master.connect(compressor);compressor.connect(ctx.destination);
+
+    const base=left===1?1120:left<=3?940:820;
+    const o1=ctx.createOscillator();o1.type="square";o1.frequency.setValueAtTime(base,now);
+    const g1=ctx.createGain();g1.gain.setValueAtTime(.72,now);o1.connect(g1);g1.connect(master);
+    const o2=ctx.createOscillator();o2.type="sine";o2.frequency.setValueAtTime(base*1.52,now);
+    const g2=ctx.createGain();g2.gain.setValueAtTime(.34,now);o2.connect(g2);g2.connect(master);
+    o1.start(now);o2.start(now);o1.stop(now+.145);o2.stop(now+.145);
   }catch{}
 }
 async function requestWakeLock(){if(runtime.role!=="host"||!runtime.host.room||runtime.host.wakeLock||!navigator.wakeLock?.request)return;try{runtime.host.wakeLock=await navigator.wakeLock.request("screen");runtime.host.wakeLock.addEventListener("release",()=>runtime.host.wakeLock=null);}catch{}}
@@ -2721,12 +3045,6 @@ document.addEventListener("click",e=>{
   else if(a==="restore-host"){restoreHostSnapshot();}
   else if(a==="discard-host"){discardHostSnapshot();}
 },true);
-
-// Persist Wolf setting when changed in an already-created room.
-document.addEventListener("click",e=>{
-  const el=e.target.closest('[data-action="wolf-toggle"]');if(!el)return;
-  setTimeout(()=>{if(runtime.role==="host"&&runtime.host.room){runtime.host.room.config.wolfEnabled=runtime.configDraft.wolfEnabled;commitHost("Zmieniono Tryb Wilka");}},0);
-});
 
 // Offer same-browser host recovery when a valid snapshot exists.
 if(runtime.role==="start" && readJSON(HOST_STORAGE_KEY)?.room && !new URLSearchParams(location.search).has("room")){

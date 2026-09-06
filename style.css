@@ -922,3 +922,292 @@ body.host-game{overflow:hidden}
   .visual-sliders{grid-template-columns:1fr}
   .music-choice-row{grid-template-columns:1fr}
 }
+
+/* v1.2.0 — responsywność, profile urządzeń, niezależne ekrany i bezpieczne tooltipy */
+
+/* Stabilne przełączniki — zamiast klikania w ukryty checkbox. */
+.toggle-button{
+  position:relative;flex:0 0 62px;width:62px;height:34px;padding:0;border:2px solid rgba(255,255,255,.45);
+  border-radius:999px;background:#34364f;box-shadow:none;cursor:pointer;transition:.16s background,.16s border-color;
+}
+.card.light .toggle-button{border-color:#a4a3ae;background:#41445d}
+.toggle-button span{position:absolute;width:24px;height:24px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.18s transform}
+.toggle-button.on{background:var(--pink);border-color:#fff}
+.toggle-button.on span{transform:translateX(28px)}
+.toggle-button:focus-visible{outline:3px solid rgba(57,198,233,.45);outline-offset:2px}
+
+/* Tooltip jest portalem w body, więc nie może zostać ucięty przez kartę/modal. */
+.info-tip-pop{display:none!important}
+.floating-info-tooltip{
+  position:fixed;z-index:100000;width:min(360px,calc(100vw - 20px));max-height:min(280px,70vh);overflow:auto;
+  padding:11px 13px;border-radius:13px;background:#11142c;color:#fff;border:1px solid rgba(255,255,255,.18);
+  box-shadow:0 16px 42px rgba(0,0,0,.45);font-size:13px;font-weight:650;line-height:1.38;pointer-events:none;
+}
+
+/* Lewa i prawa część konfiguracji mają osobne skale. */
+.config-card-main .section-title{font-size:clamp(22px,var(--ui-menu-title),44px)}
+.config-card-main .subhead{font-size:clamp(14px,var(--ui-menu-subhead),25px)}
+.config-card-main .form-label,.config-card-main .choice,.config-card-main .compact-setting{font-size:clamp(12px,var(--ui-menu-label),21px)}
+.config-card-main .mode-kicker{font-size:var(--ui-menu-kicker)}
+.config-card-main .mode-card b{font-size:var(--ui-menu-mode)}
+.config-card-main .mode-card small{font-size:var(--ui-menu-small)}
+.config-side-card .section-title{font-size:clamp(23px,var(--ui-menu-right-title),50px)}
+.config-side-card .subhead,.config-side-card .config-score-title{font-size:clamp(15px,var(--ui-menu-right-subhead),27px)}
+.config-side-card .mode-desc{font-size:clamp(12px,var(--ui-menu-right-text),22px)}
+.config-side-card .question-type-summary b,.config-side-card .config-score-group h4{font-size:clamp(12px,var(--ui-menu-right-subhead),22px)}
+.config-side-card .question-type-summary span,.config-side-card .config-score-row{font-size:clamp(10px,var(--ui-menu-right-text),18px)}
+
+/* Profil urządzenia jest niezależny od suwaków. */
+.device-profile-box{display:grid;gap:8px;margin-top:14px;padding:11px 12px;border-radius:14px;background:rgba(57,198,233,.07);border:1px solid rgba(57,198,233,.22)}
+.device-profile-box .select{min-height:44px}
+.device-profile-resolved{font-size:.78rem;font-weight:900;color:#7de0ef;white-space:nowrap}
+
+/* Ekrany inne niż rozgrywka mają własne zmienne skali. */
+.lobby-card .section-title{font-size:var(--ui-lobby-title,36px)}
+.room-code{font-size:var(--ui-lobby-code,72px)}
+.lobby-player .name{font-size:var(--ui-lobby-name,17px)}
+.lobby-player .type,.lobby-note{font-size:var(--ui-lobby-small,12px)}
+.prologue-brand{display:grid;gap:6px;align-content:start}
+.prologue-mode{font-size:var(--ui-prologue-mode,17px);font-weight:900;color:#ff9dc4;padding-left:3px}
+.prologue-text{font-size:var(--ui-prologue-text,34px);line-height:1.16;max-width:min(1120px,94vw);margin-inline:auto}
+.prologue-click-hint{font-size:var(--ui-prologue-hint,15px);position:relative;z-index:3}
+.final-host .section-title,.final-host h1{font-size:var(--ui-final-title,34px)}
+.final-host h2{font-size:var(--ui-final-subtitle,25px)}
+.final-host .ranking-name,.final-host .podium-copy b,.final-host .award-person b{font-size:var(--ui-final-text,17px)}
+
+/* Ustawienia i modale zawsze dają się przewinąć na małym ekranie. */
+.modal-backdrop{overflow:auto;overscroll-behavior:contain}
+.modal{max-height:min(92dvh,920px);overscroll-behavior:contain}
+.settings-modal,.visual-settings-modal{overflow:auto}
+.music-default-btn{min-width:132px;box-shadow:none}
+.audio-reset-row{padding-top:3px}
+.audio-reset-row .btn{min-height:40px;padding:8px 12px}
+
+/* Automatyczny tryb kompaktowy: nie blokujemy konfiguracji height:100dvh + overflow:hidden. */
+@media(max-width:980px), (max-height:650px){
+  body:not(.host-game){overflow-y:auto!important}
+  .config-shell{
+    height:auto!important;min-height:100dvh!important;overflow:visible!important;display:block!important;
+    padding:10px!important;
+  }
+  .config-shell>.topbar{margin-bottom:8px!important}
+  .config-shell .config-grid{height:auto!important;min-height:0!important;grid-template-columns:1fr!important;align-items:start!important;gap:10px!important}
+  .config-card-main,.config-side-card{height:auto!important;min-height:0!important;overflow:visible!important}
+  .config-card-main{display:block!important}
+  .config-side-card{display:block!important}
+  .config-shell .config-actions{margin-top:12px!important}
+  .mode-cards{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .config-score-groups{grid-template-columns:1fr!important}
+  .app-shell{padding:10px}
+  .modal-backdrop{place-items:start center;padding:8px}
+  .modal{width:min(720px,100%);max-height:none;margin:8px auto}
+}
+
+/* Telefon w pionie — duże elementy układają się w jedną kolumnę, wszystko przewijalne. */
+@media(max-width:560px){
+  .topbar{gap:8px}.topbar .btn{padding:9px 11px;min-height:40px}
+  .config-shell .mode-cards{grid-template-columns:1fr!important}
+  .config-shell .mode-card-wrap .mode-card{min-height:78px}
+  .quiz-difficulty-row{flex-wrap:wrap}.quiz-difficulty-row .choice{flex:1 1 30%}
+  .room-join{grid-template-columns:1fr!important}
+  .player-lobby-grid{grid-template-columns:1fr!important}
+  .music-choice-row{grid-template-columns:1fr!important}
+  .visual-sliders{grid-template-columns:1fr!important}
+  .settings-section{padding:9px}
+  .prologue{height:auto;min-height:100dvh;overflow:auto;padding:10px}
+  .prologue .topbar{align-items:flex-start}
+  .prologue .topbar>.row{flex-wrap:wrap;justify-content:flex-end}
+  .prologue-scene{height:min(45vh,390px)}
+}
+
+/* Małe okno w poziomie — rozgrywka zachowuje trzy kolumny, ale agresywniej się kompresuje. */
+@media(max-width:1050px) and (orientation:landscape){
+  .host-root{padding:6px 7px}
+  .host-grid{grid-template-columns:minmax(145px,20%) minmax(0,57%) minmax(175px,23%);gap:6px}
+  .host-left,.host-right{padding-top:52px}
+  .host-floating-header{left:7px;right:7px;top:5px}
+  .host-branding .logo{font-size:clamp(25px,3vw,38px)}
+  .host-mode-badge{font-size:11px;padding:6px 8px}
+  .host-right{gap:6px;grid-template-rows:minmax(90px,1.08fr) minmax(92px,1fr) minmax(75px,.74fr)}
+  .host-panel{border-radius:13px;padding:7px}
+  .host-center{grid-template-rows:minmax(150px,37%) auto minmax(0,1fr) auto;gap:5px}
+  .main-scene{min-height:145px}
+  .host-bottom-bar{gap:6px;min-height:44px}
+  .host-round-bottom .pill,.host-bottom-actions .btn{min-height:40px;padding:6px 9px;font-size:12px}
+  .host-timer-bottom .countdown{min-height:40px;min-width:94px;padding:5px 9px}
+}
+
+/* Profile ręczne — przede wszystkim zwartość layoutu, nie sztuczna zmiana rozdzielczości. */
+html[data-device-profile="phone"] .app-shell{padding:8px}
+html[data-device-profile="phone"] .config-shell .config-grid{gap:8px}
+html[data-device-profile="phone"] .config-shell .card.pad{padding:10px}
+html[data-device-profile="tablet"] .config-shell .card.pad{padding:12px 14px}
+html[data-device-profile="tv"] .host-panel{padding:14px}
+html[data-device-profile="tv"] .host-grid{gap:12px}
+
+/* Przy ekstremalnej skali konfiguracji zawartość ma się przewinąć, nigdy nachodzić. */
+.config-card-main,.config-side-card{overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(90,74,116,.35) transparent}
+.config-card-main::-webkit-scrollbar,.config-side-card::-webkit-scrollbar{width:6px}
+.config-card-main::-webkit-scrollbar-thumb,.config-side-card::-webkit-scrollbar-thumb{background:rgba(90,74,116,.28);border-radius:99px}
+
+html[data-device-profile="phone"] body:not(.host-game){overflow-y:auto!important}
+html[data-device-profile="phone"] .config-shell{height:auto!important;min-height:100dvh!important;overflow:visible!important;display:block!important}
+html[data-device-profile="phone"] .config-shell .config-grid{height:auto!important;grid-template-columns:1fr!important}
+html[data-device-profile="phone"] .config-card-main,html[data-device-profile="phone"] .config-side-card{height:auto!important;overflow:visible!important}
+html[data-device-profile="phone"] .mode-cards{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+
+
+/* v1.2.1 — działające checkboxy Wilka i piknięcia */
+.card.light .switch span{background:#4a4d64;border-color:#9295a4}
+.card.light .switch input:checked+span{background:var(--pink);border-color:#d42f72}
+.switch input:focus-visible+span{outline:3px solid rgba(57,198,233,.42);outline-offset:3px}
+
+/* v1.3.0 — głosowanie kategorii w Quizie */
+.quiz-active-category{
+  background:rgba(57,198,233,.16);
+  color:#d8f7ff;
+  border:1px solid rgba(57,198,233,.45);
+  max-width:min(38vw,420px);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.quiz-category-vote-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+  height:100%;
+  min-height:0;
+  align-content:stretch;
+}
+.quiz-category-vote-grid.count-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.quiz-category-vote-grid.count-3,.quiz-category-vote-grid.count-4{grid-template-columns:repeat(2,minmax(0,1fr))}
+.quiz-category-vote-grid.count-1{grid-template-columns:minmax(0,1fr)}
+.quiz-category-vote-card{
+  min-height:0;
+  padding:clamp(12px,1.2vw,20px);
+  border-radius:20px;
+  background:linear-gradient(145deg,rgba(57,198,233,.15),rgba(156,85,219,.18));
+  border:2px solid rgba(255,255,255,.18);
+  display:grid;
+  place-items:center;
+  align-content:center;
+  gap:8px;
+  text-align:center;
+  box-shadow:0 8px 20px rgba(0,0,0,.14);
+}
+.quiz-category-vote-card.winner{
+  border-color:#ffd86a;
+  box-shadow:0 0 0 2px rgba(255,216,106,.25),0 0 26px rgba(255,200,61,.28);
+}
+.quiz-cat-icon{font-size:clamp(34px,4vw,66px);line-height:1}
+.quiz-cat-name{font-size:clamp(18px,1.8vw,30px);font-weight:1000;line-height:1.08;text-wrap:balance}
+.quiz-cat-score{font-size:clamp(12px,1vw,16px);font-weight:950;color:#ffd86a;letter-spacing:.04em}
+.phone-quiz-category{
+  margin:0 0 10px;
+  padding:9px 12px;
+  border-radius:14px;
+  background:rgba(57,198,233,.12);
+  border:1px solid rgba(57,198,233,.32);
+  color:#e8fbff;
+  text-align:center;
+  font-size:clamp(13px,3.8vw,18px);
+}
+.category-phone-box{padding:4px 0 8px}
+.category-phone-box h2{margin:4px 0 6px}
+.category-phone-box>p{margin:0 0 12px;color:#d2d5e7}
+.phone-category-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.phone-category-choice{
+  min-height:112px;
+  padding:12px 9px;
+  border-radius:18px;
+  border:2px solid rgba(255,255,255,.18);
+  background:linear-gradient(145deg,rgba(57,198,233,.12),rgba(156,85,219,.16));
+  color:#fff;
+  display:grid;
+  place-items:center;
+  align-content:center;
+  gap:7px;
+  text-align:center;
+}
+.phone-category-choice span{font-size:34px;line-height:1}
+.phone-category-choice b{font-size:clamp(15px,4vw,20px);line-height:1.12}
+.phone-category-choice.selected{
+  border-color:rgba(255,255,255,.88);
+  box-shadow:0 0 0 2px rgba(255,255,255,.18),0 0 20px rgba(57,198,233,.32),inset 0 0 18px rgba(255,255,255,.08);
+}
+.category-token{margin-top:12px}
+@media(max-width:720px){
+  .phone-category-grid{grid-template-columns:1fr 1fr}
+  .quiz-active-category{max-width:52vw;font-size:11px;padding:6px 8px}
+}
+@media(max-height:650px) and (orientation:landscape){
+  .quiz-category-vote-card{padding:8px 10px;border-radius:15px}
+  .quiz-cat-icon{font-size:clamp(26px,3vw,42px)}
+  .quiz-cat-name{font-size:clamp(15px,1.45vw,22px)}
+}
+
+
+/* v1.3.1 — finał z jednoznacznym, dużym zwycięzcą */
+.final-host{grid-template-rows:auto auto minmax(0,1fr) auto}
+.final-top-stage{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(250px,.85fr);gap:10px;min-height:0}
+.winner-hero{
+  min-height:190px;padding:14px 20px;border-radius:22px;position:relative;overflow:hidden;
+  display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:18px;
+  background:
+    radial-gradient(circle at 20% 50%,rgba(255,215,70,.19),transparent 42%),
+    linear-gradient(135deg,rgba(255,200,61,.20),rgba(255,255,255,.075));
+  border:2px solid rgba(255,211,72,.78);box-shadow:0 12px 34px rgba(0,0,0,.22),inset 0 0 34px rgba(255,211,72,.05)
+}
+.winner-hero:after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,rgba(255,255,255,.08),transparent 35%,transparent 68%,rgba(255,200,61,.08))}
+.winner-heading{display:flex;align-items:center;gap:11px;min-width:175px;position:relative;z-index:1}
+.winner-crown{font-size:clamp(42px,4.4vw,72px);filter:drop-shadow(0 5px 10px rgba(0,0,0,.28));line-height:1}
+.winner-kicker{font-size:clamp(17px,1.55vw,26px);font-weight:1000;letter-spacing:.065em;color:#ffd76a;text-shadow:0 3px 10px rgba(0,0,0,.3)}
+.winner-place{font-size:clamp(13px,1.05vw,18px);font-weight:950;color:#fff;margin-top:3px}
+.winner-people{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:clamp(10px,1.2vw,18px);min-width:0;position:relative;z-index:1}
+.winner-person{display:grid;grid-template-columns:clamp(104px,9vw,148px) minmax(0,1fr);align-items:center;gap:14px;min-width:min(315px,100%);max-width:100%}
+.winner-person img{width:clamp(104px,9vw,148px);height:clamp(104px,9vw,148px);border-radius:50%;object-fit:cover;border:5px solid #ffd75f;box-shadow:0 0 0 4px rgba(255,255,255,.36),0 12px 26px rgba(0,0,0,.28)}
+.winner-copy{display:grid;gap:3px;min-width:0}
+.winner-name{font-size:clamp(25px,2.35vw,40px);font-weight:1000;line-height:1.02;white-space:normal;overflow-wrap:anywhere}
+.winner-type{font-size:clamp(12px,.95vw,16px);font-weight:800;color:#d7dbee;line-height:1.1}
+.winner-score{font-size:clamp(25px,2.05vw,36px);font-weight:1000;color:var(--yellow);line-height:1.05;margin-top:4px}
+.winner-hero.winner-tie{grid-template-columns:auto minmax(0,1fr)}
+.winner-hero.winner-tie .winner-person{grid-template-columns:clamp(78px,6.7vw,108px) minmax(0,1fr);min-width:210px;flex:1 1 210px}
+.winner-hero.winner-tie .winner-person img{width:clamp(78px,6.7vw,108px);height:clamp(78px,6.7vw,108px);border-width:4px}
+.winner-hero.winner-tie .winner-name{font-size:clamp(20px,1.65vw,29px)}
+.winner-hero.winner-tie .winner-score{font-size:clamp(20px,1.55vw,27px)}
+.winner-hero.winner-count-4 .winner-person,.winner-hero.winner-count-5 .winner-person{min-width:165px;grid-template-columns:70px minmax(0,1fr)}
+.winner-hero.winner-count-4 .winner-person img,.winner-hero.winner-count-5 .winner-person img{width:70px;height:70px}
+.runner-podium{display:grid;grid-template-rows:repeat(2,minmax(0,1fr));gap:10px;min-height:0}
+.runner-podium .podium-level{padding:8px 11px}
+.runner-podium .podium-title{font-size:clamp(14px,1.15vw,19px);margin-bottom:4px;justify-content:flex-start}
+.runner-podium .podium-medal{font-size:clamp(20px,1.8vw,30px)}
+.runner-podium .podium-person{grid-template-columns:clamp(42px,3.7vw,58px) minmax(0,1fr);gap:8px;min-width:130px;flex:1 1 130px}
+.runner-podium .podium-person img{width:clamp(42px,3.7vw,58px);height:clamp(42px,3.7vw,58px);border-width:2px}
+.runner-podium .podium-copy b{font-size:clamp(13px,1.05vw,18px)}
+.runner-podium .podium-copy strong{font-size:clamp(13px,1vw,17px)}
+.ranking-row.ranking-winner{background:linear-gradient(90deg,rgba(255,200,61,.16),rgba(255,255,255,.045));border:1px solid rgba(255,200,61,.28)}
+
+@media(max-height:760px) and (orientation:landscape){
+  .final-top-stage{grid-template-columns:minmax(0,1.7fr) minmax(220px,.8fr);gap:7px}
+  .winner-hero{min-height:142px;padding:8px 13px;gap:10px}
+  .winner-heading{min-width:145px;gap:7px}
+  .winner-crown{font-size:clamp(34px,3.5vw,50px)}
+  .winner-kicker{font-size:clamp(14px,1.25vw,20px)}
+  .winner-place{font-size:clamp(11px,.85vw,14px)}
+  .winner-person{grid-template-columns:clamp(76px,6.2vw,100px) minmax(0,1fr);min-width:230px;gap:9px}
+  .winner-person img{width:clamp(76px,6.2vw,100px);height:clamp(76px,6.2vw,100px);border-width:4px}
+  .winner-name{font-size:clamp(20px,1.75vw,28px)}
+  .winner-score{font-size:clamp(20px,1.6vw,26px)}
+  .runner-podium{gap:7px}
+  .runner-podium .podium-level{padding:5px 8px}
+}
+@media(max-width:900px),(orientation:portrait){
+  .final-host{height:auto;min-height:100dvh;overflow:auto}
+  .final-top-stage{grid-template-columns:1fr}
+  .winner-hero{grid-template-columns:1fr;justify-items:center;text-align:center}
+  .winner-heading{min-width:0;justify-content:center}
+  .winner-person{min-width:min(340px,100%);text-align:left}
+  .runner-podium{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:none}
+  .final-main{grid-template-columns:1fr;overflow:visible}
+}
