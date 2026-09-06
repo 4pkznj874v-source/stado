@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.1.4";
+const APP_VERSION = "1.1.5";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -18,7 +18,7 @@ const COLORS = [
 const MODE = {
   warmup: {label:"Rozgrzewka", short:"Na trzeźwo", music:2, desc:"Gotowe pytania i odpowiedzi"},
   freestyle: {label:"Freestyle", short:"Po dwóch drinkach", music:3, desc:"Pytania z gry, odpowiedzi od Was"},
-  hardcore: {label:"Hardcore", short:"Hardcore", music:4, desc:"Sami tworzycie pytania i odpowiedzi"},
+  hardcore: {label:"Sandbox", short:"Hardcore", music:4, desc:"Sami tworzycie pytania i odpowiedzi"},
   quiz: {label:"Quiz", short:"Quiz", music:2, desc:"Wiedza • 3 poziomy • 10 kategorii"}
 };
 const QUIZ_DIFFICULTIES = [
@@ -39,6 +39,13 @@ const QUIZ_CATEGORIES = [
   {key:"adult",label:"18+ / tabu i mocniejsze fakty",icon:"🔥",aliases:["18+ / tabu i mocniejsze fakty","18+","Tabu","Mocniejsze fakty","Inne"]}
 ];
 const ALL_QUIZ_CATEGORY_KEYS = QUIZ_CATEGORIES.map(x=>x.key);
+const CONFIG_HELP = {
+  timer: "Każda faza gry dostaje własny pełny limit czasu od 10 do 120 sekund. Jeśli gracz nie odda głosu w czasie, w tej rundzie dostaje 0 pkt. W fazie pisania po upływie czasu brakująca odpowiedź nie trafia do głosowania.",
+  answers: "Rekomendacja: 3–4 Owce → 3 odpowiedzi, 5–8 → 4, 9–12 → 5. Jeżeli graczy jest mniej niż wybrana liczba odpowiedzi, gra automatycznie ogranicza liczbę odpowiedzi do liczby aktywnych Owiec.",
+  wolf: "Wilk to opcjonalna tajna minigra po oddaniu głosu. Wilk typuje, na co zagłosuje wybrana Owca. Trafienie daje +1 Wilkowi i może odebrać do 2 pkt celowi; pudło kosztuje Wilka 1 pkt; rezygnacja = 0.",
+  quiz: "Quiz ma zawsze 5 odpowiedzi i dokładnie jedną poprawną. Minimum 2 graczy. Nie ma Czarnej Owcy, Barana ani pisania odpowiedzi. Każdy zaczyna z 2 Żetonami Wełny.",
+  quizCategories: "Domyślnie aktywne są wszystkie 10 kategorii. Możesz zostawić pełny miks albo wybrać dowolny zestaw kategorii. Gra losuje wyłącznie pytania pasujące jednocześnie do wybranego poziomu i kategorii."
+};
 const PROLOGUE = [
   "Każde Stado gdzieś zmierza.",
   "Niektóre Owce wiedzą dokąd, inne po prostu jadą z resztą.",
@@ -238,6 +245,18 @@ function handleClick(e){
       hostCloseRoom
     );
     return;
+  }
+
+  if(a === "help-info"){
+    const key=String(id||value||"");
+    const text=CONFIG_HELP[key];
+    if(text){runtime.modal={type:"help-info",helpKey:key,text};render();}
+    return;
+  }
+  if(a === "quiz-categories-open"){
+    ensureQuizConfig(runtime.configDraft);
+    runtime.modal={type:"quiz-categories"};
+    render(); return;
   }
 
   if(a === "mode"){
@@ -1904,30 +1923,32 @@ function renderHost(){
   return renderHostGame(r);
 }
 
+function infoTip(key,label="Więcej informacji"){
+  const text=CONFIG_HELP[key]||"";
+  return `<button type="button" class="info-tip" data-action="help-info" data-id="${escAttr(key)}" aria-label="${escAttr(label)}">i<span class="info-tip-pop">${esc(text)}</span></button>`;
+}
+
 function renderConfig(room=null){
   // Konfiguracja jest edytowana w configDraft także wtedy, gdy pokój już istnieje.
-  // Dzięki temu zmiana trybu/liczby odpowiedzi/timera po „Ustaw grę od nowa” działa od razu.
   const cfg=runtime.configDraft;
   const fake=room?{...room,config:{...cfg}}:makeRoom(cfg,"------","preview");
   const pf=preflight(fake);
-  const suggested=`3–4 Owce → 3 • 5–8 → 4 • 9–12 → 5`;
-  return `<main class="app-shell">
+  return `<main class="app-shell config-shell">
     <div class="topbar">${logoHTML()}<button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div>
     <section class="config-grid">
-      <article class="card light pad">
+      <article class="card light pad config-card-main">
         <h1 class="section-title">Ustaw grę</h1>
         <label class="form-label">Liczba rund: <b id="roundValue">${cfg.roundsPlanned}</b></label>
         <div class="range-row"><input id="rounds" type="range" min="3" max="30" value="${cfg.roundsPlanned}"><span>3–30</span></div>
-        <label class="form-label" style="margin-top:18px">⏱ Limit czasu na ruch: <b id="responseTimeValue">${formatTimeSetting(cfg.responseTimeSec??60)}</b></label>
+        <div class="config-label-row" style="margin-top:16px"><label class="form-label" for="responseTimeSelect">⏱ Limit czasu: <b id="responseTimeValue">${formatTimeSetting(cfg.responseTimeSec??60)}</b></label>${infoTip("timer","Jak działa limit czasu?")}</div>
         <select id="responseTimeSelect" class="select timer-select">${Array.from({length:12},(_,i)=>(i+1)*10).map(sec=>`<option value="${sec}" ${clamp(+(cfg.responseTimeSec??60),10,120)===sec?"selected":""}>${sec<60?`${sec} sekund`:sec===60?"1 minuta":sec===120?"2 minuty":`1 min ${sec-60} s`}</option>`).join("")}</select>
-        <p class="muted small">Zakres 10–120 s. Każda faza dostaje własny pełny limit. Brak głosu w czasie = 0 pkt w tej rundzie.</p>
-        <h3 class="subhead" style="margin-top:22px">Jak grubo gramy?</h3>
+        <h3 class="subhead config-section-title">Jak grubo gramy?</h3>
         <div class="mode-cards">${Object.entries(MODE).map(([key,m])=>`<button class="mode-card ${cfg.mode===key?"active":""}" data-action="mode" data-value="${key}"><span class="mode-kicker">${esc(m.short)}</span><b>${modeIcon(key)} ${esc(m.label)}</b><small>${esc(m.desc)}</small></button>`).join("")}</div>
-        ${cfg.mode==="quiz"?renderQuizConfigControls(cfg):`<h3 class="subhead" style="margin-top:22px">Liczba odpowiedzi</h3><div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div><p class="muted small">${suggested}. Jeżeli dołączy mniej graczy niż wybrano odpowiedzi, liczba odpowiedzi spada do liczby aktywnych Owiec.</p>`}
-        ${cfg.mode!=="quiz"?`<div class="info-item"><label class="spread"><span><b>🐺 Tryb Wilka</b><br><small class="muted">Tajna minigra po oddaniu głosu</small></span><span class="switch"><input type="checkbox" ${cfg.wolfEnabled?"checked":""} data-action="wolf-toggle"><span></span></span></label></div>`:""}
-        <div class="row wrap" style="margin-top:20px"><button class="btn" data-action="create-room">${room?"ZAPISZ I WRÓĆ DO LOBBY":"UTWÓRZ POKÓJ"}</button>${!room?`<button class="btn light" data-action="back-start">Wróć</button>`:""}</div><div style="margin-top:14px">${versionHTML()}</div>
+        ${cfg.mode==="quiz"?renderQuizConfigControls(cfg):`<div class="config-label-row config-section-title"><h3 class="subhead">Liczba odpowiedzi</h3>${infoTip("answers","Jak dobrać liczbę odpowiedzi?")}</div><div class="choice-row">${[3,4,5].map(n=>`<button class="choice ${cfg.answerCountRequested===n?"active":""}" data-action="answer-count" data-value="${n}">${n}</button>`).join("")}</div>`}
+        ${cfg.mode!=="quiz"?`<div class="info-item compact-setting"><div class="spread"><span class="setting-title">🐺 Tryb Wilka ${infoTip("wolf","Jak działa Wilk?")}</span><span class="switch"><input type="checkbox" ${cfg.wolfEnabled?"checked":""} data-action="wolf-toggle"><span></span></span></div></div>`:""}
+        <div class="row wrap config-actions"><button class="btn" data-action="create-room">${room?"ZAPISZ I WRÓĆ DO LOBBY":"UTWÓRZ POKÓJ"}</button>${!room?`<button class="btn light" data-action="back-start">Wróć</button>`:""}</div><div class="config-version">${versionHTML()}</div>
       </article>
-      <article class="card pad">
+      <article class="card pad config-side-card">
         <h2 class="section-title">${modeIcon(cfg.mode)} ${esc(MODE[cfg.mode].label)}</h2>
         ${modeDescription(cfg.mode)}
         <h3 class="subhead">Jak działa punktacja?</h3>
@@ -1944,13 +1965,14 @@ function renderConfig(room=null){
 function renderQuizConfigControls(cfg){
   ensureQuizConfig(cfg);
   const allSelected=cfg.quizCategories.length===ALL_QUIZ_CATEGORY_KEYS.length;
+  const categorySummary=allSelected?"Wszystkie 10":`${cfg.quizCategories.length}/10 wybranych`;
   return `<div class="quiz-config-block">
-    <div class="info-item"><b>🧠 Quiz: 5 odpowiedzi, dokładnie 1 poprawna</b><br><small class="muted">Minimum 2 graczy. Brak Czarnej Owcy, Barana, tworzenia odpowiedzi i Wilka.</small></div>
-    <h3 class="subhead">Poziom pytań</h3>
+    <div class="config-label-row"><h3 class="subhead">Poziom pytań</h3>${infoTip("quiz","Zasady trybu Quiz")}</div>
     <div class="choice-row quiz-difficulty-row">${QUIZ_DIFFICULTIES.map(d=>`<button class="choice quiz-difficulty ${cfg.quizDifficulty===d.key?"active":""}" data-action="quiz-difficulty" data-value="${d.key}">${d.icon} ${d.label}</button>`).join("")}</div>
-    <div class="spread quiz-category-heading"><h3 class="subhead">Kategorie pytań</h3><button class="btn light quiz-all-btn ${allSelected?"active":""}" data-action="quiz-category-all">Wszystkie 10</button></div>
-    <div class="quiz-category-grid">${QUIZ_CATEGORIES.map(cat=>`<button class="quiz-category ${cfg.quizCategories.includes(cat.key)?"active":""}" data-action="quiz-category" data-value="${cat.key}"><span>${cat.icon}</span><b>${esc(cat.label)}</b></button>`).join("")}</div>
-    <p class="muted small">Możesz łączyć kilka kategorii. Wybrano <b>${cfg.quizCategories.length}/10</b>.</p>
+    <div class="category-launch-row">
+      <button class="btn light category-launch" data-action="quiz-categories-open"><span>🗂 Kategorie pytań</span><b>${esc(categorySummary)}</b></button>
+      ${infoTip("quizCategories","Jak wybierać kategorie?")}
+    </div>
   </div>`;
 }
 function modeDescription(mode){
@@ -2276,14 +2298,22 @@ function renderModal(){
   removeModalNode();const m=runtime.modal;if(!m)return;
   const root=document.createElement("div");root.id="modal-root";root.className="modal-backdrop";
   let body="";
-  if(m.type==="how")body=`<div class="modal card"><h2>Jak działa STADO?</h2><p>Jedno urządzenie prowadzi grę na dużym ekranie. Każdy gracz dołącza telefonem, wybiera własną Owcę i głosuje prywatnie.</p><p>Próbuj myśleć jak największe Stado albo zostań jedyną Czarną Owcą. W Freestyle sami tworzycie odpowiedzi, a w Hardcore Baran tworzy również pytanie.</p><div class="modal-actions"><button class="btn" data-action="close-modal">Rozumiem</button></div></div>`;
+  if(m.type==="how")body=`<div class="modal card"><h2>Jak działa STADO?</h2><p>Jedno urządzenie prowadzi grę na dużym ekranie. Każdy gracz dołącza telefonem, wybiera własną Owcę i głosuje prywatnie.</p><p>Próbuj myśleć jak największe Stado albo zostań jedyną Czarną Owcą. W Freestyle sami tworzycie odpowiedzi, a w Sandboxie Baran tworzy również pytanie.</p><div class="modal-actions"><button class="btn" data-action="close-modal">Rozumiem</button></div></div>`;
   else if(m.type==="confirm")body=`<div class="modal card"><h2>${esc(m.title)}</h2><p>${esc(m.text)}</p><div class="modal-actions"><button class="btn secondary" data-action="confirm-no">Anuluj</button><button class="btn danger" data-action="confirm-yes">Potwierdź</button></div></div>`;
   else if(m.type==="preflight")body=`<div class="modal card"><h2>Nie można wystartować</h2>${m.errors.map(x=>`<p class="error-text">● ${esc(x)}</p>`).join("")}${m.warnings.map(x=>`<p class="muted">● ${esc(x)}</p>`).join("")}<div class="modal-actions"><button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
+  else if(m.type==="help-info")body=`<div class="modal card info-modal"><h2>ℹ Informacja</h2><p>${esc(m.text||"")}</p><div class="modal-actions"><button class="btn" data-action="close-modal">Rozumiem</button></div></div>`;
+  else if(m.type==="quiz-categories")body=renderQuizCategoriesModal();
   else if(m.type==="settings")body=renderSettingsModal();
   root.innerHTML=body;document.body.appendChild(root);afterModalRender();
 }
 function removeModalNode(){document.getElementById("modal-root")?.remove();}
 function confirmModal(title,text,onConfirm){runtime.modal={type:"confirm",title,text,onConfirm};render();}
+function renderQuizCategoriesModal(){
+  ensureQuizConfig(runtime.configDraft);
+  const selected=runtime.configDraft.quizCategories||[];
+  const allSelected=selected.length===ALL_QUIZ_CATEGORY_KEYS.length;
+  return `<div class="modal card quiz-categories-modal"><div class="spread"><div><h2>🗂 Kategorie pytań</h2><p class="category-modal-summary">Wybrano <b>${selected.length}/10</b></p></div><button class="btn light quiz-all-btn ${allSelected?"active":""}" data-action="quiz-category-all">Wszystkie 10</button></div><div class="quiz-category-modal-grid">${QUIZ_CATEGORIES.map(cat=>`<button class="quiz-category ${selected.includes(cat.key)?"active":""}" data-action="quiz-category" data-value="${cat.key}"><span>${cat.icon}</span><b>${esc(cat.label)}</b><i>${selected.includes(cat.key)?"✓":""}</i></button>`).join("")}</div><div class="modal-actions"><button class="btn" data-action="close-modal">GOTOWE</button></div></div>`;
+}
 function renderSettingsModal(){
   if(runtime.role==="player")return `<div class="modal card"><h2>⚙ Ustawienia telefonu</h2><div class="info-list"><div class="info-item">Połączenie: <b>${runtime.player.connected?"online":"offline"}</b></div><div class="info-item">Wersja: <b>${APP_VERSION}</b></div><div class="info-item">Telefon gracza nie odtwarza muzyki ani efektów dźwiękowych.</div></div><div class="modal-actions"><button class="btn secondary" data-action="player-reconnect">Połącz ponownie</button><button class="btn ghost" data-action="player-menu">Wyjdź do menu</button><button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
   const r=runtime.host.room;
