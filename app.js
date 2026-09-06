@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.1.3";
+const APP_VERSION = "1.1.4";
 const PROTOCOL_VERSION = "stado-v1";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -2004,14 +2004,20 @@ function renderHostGame(r){
                 : {avatar:47,name:13,type:9,score:13,icon:16};
   const playerVars=`--players:${Math.max(aps.length,1)};--host-avatar:${playerMetrics.avatar}px;--host-name:${playerMetrics.name}px;--host-type:${playerMetrics.type}px;--host-score:${playerMetrics.score}px;--host-icon:${playerMetrics.icon}px`;
   return `<main class="host-root">
-    <header class="host-header"><div>${logoHTML()}</div><div class="host-round"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span>${countdownHTML(c)}<span class="badge pink">${modeIcon(r.config.mode)} ${esc(mode.label)}</span>${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 Baran: ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div><div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div></header>
+    <header class="host-floating-header">
+      <div class="host-branding"><span class="badge pink host-mode-badge">${modeIcon(r.config.mode)} ${esc(mode.label)}</span>${logoHTML()}</div>
+      <div class="host-header-actions"><button class="btn ghost" data-action="open-settings">⚙ Ustawienia</button></div>
+    </header>
     <section class="host-grid">
       <aside class="host-side host-left"><div class="host-panel"><h3>Owce: ${aps.length}/${MAX_PLAYERS} <span class="small muted">• ranking</span></h3></div><div class="host-panel"><div class="host-player-list" style="${playerVars}">${scoreboard.map(p=>renderHostPlayer(p,c)).join("")}</div></div></aside>
       <main class="host-center ${phase==="RESULT"?"has-result":""}">
         <div class="main-scene"><img src="assets/scenes/glowne.png" alt="STADO — główna scena"></div>
         ${renderHostQuestion(c,r)}
         <div class="answer-area">${renderHostAnswerArea(c,r)}</div>
-        <div class="host-bottom-actions">${renderHostBottomActions(c,r)}</div>
+        <div class="host-bottom-bar">
+          <div class="host-round-bottom"><span class="pill">RUNDA ${r.match?.roundNumber||0} / ${r.match?.plannedRounds||r.config.roundsPlanned}</span>${countdownHTML(c)}${r.config.mode==="hardcore"&&c?.ramPlayerId?`<span class="badge yellow">🐏 ${esc(playerById(c.ramPlayerId)?.name||"")}</span>`:""}</div>
+          <div class="host-bottom-actions">${renderHostBottomActions(c,r)}</div>
+        </div>
       </main>
       <aside class="host-side host-right">
         <div class="host-panel host-info-panel"><h3>💬 Teraz</h3>${renderHostStatus(c,r)}</div>

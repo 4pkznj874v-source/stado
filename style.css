@@ -476,3 +476,117 @@ body{
   .host-info-panel .status-lines{font-size:clamp(11px,.95vw,15px)}
   .prologue-click-hint{padding:5px 10px;font-size:12px}
 }
+
+/* v1.1.4 — większa scena główna, metadane rundy na dole, miękkie zaznaczenia */
+body.host-game{overflow:hidden}
+.host-root{
+  height:100dvh;
+  padding:8px 12px 10px;
+  display:grid;
+  grid-template-rows:1fr;
+  gap:0;
+  position:relative;
+  z-index:1;
+}
+.host-floating-header{
+  position:absolute;
+  z-index:30;
+  top:8px;
+  left:12px;
+  right:12px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:14px;
+  pointer-events:none;
+}
+.host-floating-header>*{pointer-events:auto}
+.host-branding{display:flex;align-items:center;gap:10px;min-width:0}
+.host-branding .logo{font-size:clamp(30px,3.2vw,52px)}
+.host-mode-badge{font-size:clamp(12px,1.02vw,17px);padding:8px 12px;white-space:nowrap;box-shadow:0 5px 18px rgba(0,0,0,.18)}
+.host-floating-header .host-header-actions{margin-left:auto}
+.host-floating-header .host-header-actions .btn{min-height:44px;padding:9px 15px;background:rgba(25,24,57,.56);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+
+.host-grid{
+  min-height:0;
+  height:100%;
+  display:grid;
+  grid-template-columns:minmax(220px,22%) minmax(0,55%) minmax(240px,23%);
+  gap:10px;
+}
+.host-left,.host-right{padding-top:66px}
+.host-center{
+  min-height:0;
+  display:grid;
+  grid-template-rows:minmax(235px,43%) auto minmax(0,1fr) auto;
+  gap:7px;
+  padding-top:0;
+}
+.main-scene{
+  min-height:220px;
+  margin-top:-2px;
+  border-radius:0 0 30px 30px;
+  background:radial-gradient(ellipse at center,rgba(92,66,151,.12),transparent 75%);
+  overflow:hidden;
+}
+.main-scene img{
+  transform:scale(1.22);
+  object-position:center 43%;
+  filter:drop-shadow(0 22px 28px rgba(0,0,0,.24));
+  -webkit-mask-image:radial-gradient(ellipse 96% 94% at 50% 47%,#000 62%,rgba(0,0,0,.94) 78%,transparent 100%);
+  mask-image:radial-gradient(ellipse 96% 94% at 50% 47%,#000 62%,rgba(0,0,0,.94) 78%,transparent 100%);
+}
+.host-bottom-bar{
+  min-height:52px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:12px;
+  padding:3px 2px 0;
+}
+.host-round-bottom{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  justify-content:flex-start;
+  flex-wrap:wrap;
+  min-width:0;
+}
+.host-round-bottom .pill,.host-round-bottom .badge{font-size:clamp(12px,1vw,16px);padding:8px 12px}
+.host-round-bottom .countdown{font-size:clamp(13px,1.05vw,17px);padding:8px 12px}
+.host-bottom-actions{min-height:44px;padding:0;justify-content:flex-end;align-items:center}
+.host-bottom-actions:empty{display:none}
+.host-center.has-result .host-bottom-actions{min-height:44px}
+
+/* Zaznaczenie / zwycięska odpowiedź — dopasowana obwódka z miękkim zanikiem. */
+.answer-card,.phone-answer,.phone-sheep-option,.sheep-option,.wolf-target,.big-sheep-card{position:relative}
+.answer-card.winner,.phone-answer.selected,.phone-sheep-option.selected,.sheep-option.winner,.wolf-target.selected,.big-sheep-card.selected{
+  outline:0;
+  border-color:rgba(255,255,255,.34);
+  box-shadow:0 0 0 1px rgba(255,255,255,.22),0 0 18px rgba(255,255,255,.28),inset 0 0 24px rgba(255,255,255,.12);
+  filter:brightness(1.035);
+}
+.answer-card.winner::after,.phone-answer.selected::after,.phone-sheep-option.selected::after,.sheep-option.winner::after,.wolf-target.selected::after,.big-sheep-card.selected::after{
+  content:"";
+  position:absolute;
+  inset:2px;
+  border-radius:inherit;
+  border:3px solid rgba(255,255,255,.88);
+  box-shadow:0 0 10px rgba(255,255,255,.52),inset 0 0 13px rgba(255,255,255,.28);
+  pointer-events:none;
+  opacity:.9;
+}
+.answer-card.black-sheep{box-shadow:0 0 0 3px rgba(12,12,18,.9),0 0 20px rgba(255,255,255,.34),inset 0 0 20px rgba(0,0,0,.22)}
+.phone-answer.selected{border-color:rgba(255,255,255,.22)}
+.phone-sheep-option.selected,.wolf-target.selected{border-color:rgba(255,255,255,.2)}
+
+@media(max-height:720px) and (orientation:landscape){
+  .host-root{padding:6px 10px 8px}
+  .host-floating-header{top:6px;left:10px;right:10px}
+  .host-left,.host-right{padding-top:56px}
+  .host-center{grid-template-rows:minmax(185px,39%) auto minmax(0,1fr) auto}
+  .main-scene{min-height:175px}
+  .main-scene img{transform:scale(1.16)}
+  .host-bottom-bar{min-height:44px;gap:8px}
+  .host-round-bottom .pill,.host-round-bottom .badge{padding:6px 9px;font-size:clamp(11px,.9vw,14px)}
+}
