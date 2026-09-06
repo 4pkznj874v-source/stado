@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.3.3";
+const APP_VERSION = "1.3.4";
 const PROTOCOL_VERSION = "stado-v2";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -138,7 +138,7 @@ const runtime = {
     drafts:{question:"", answer:"", hardcoreType:"open", voteOptionId:"", useToken:false, huntTargetId:"", huntOptionId:"", categoryKey:"", categoryUseToken:false, categoryTieKey:""},
     waitingRecovery:false, reconnecting:false, lastAttemptId:null
   },
-  audio: {track:0, defaultTrack:1, manualTrack:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:"", tickEnabled:true, tickVolume:1, endEnabled:true, lastTickKey:"", lastEndKey:"", tickContext:null},
+  audio: {track:0, defaultTrack:1, manualTrack:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:"", tickEnabled:true, tickVolume:1, endEnabled:true, lastTickKey:"", lastEndKey:"", tickContext:null, musicContext:null, musicGain:null, musicSources:new Map()},
   visual: loadVisualPrefs(),
   data: normalizeQuestionData(rawQuestions),
   quizData: normalizeQuizData(rawQuizQuestions),
@@ -2944,10 +2944,39 @@ function loadAudioPrefs(){
   }
   syncAudioElements();syncTimerEndAudio();
 }
-function syncAudioElements(){for(let i=1;i<=AUDIO_TRACK_COUNT;i++){const el=document.getElementById(`music${i}`);if(el){el.volume=runtime.audio.muted?0:runtime.audio.volume;}}}
-function setAudioVolume(v){runtime.audio.volume=clamp(v,0,1);syncAudioElements();saveAudioPrefs();}
+function ensureMusicMixer(){
+  if(typeof window==="undefined")return false;
+  const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;
+  try{
+    if(!runtime.audio.musicContext)runtime.audio.musicContext=new AC();
+    const ctx=runtime.audio.musicContext;
+    if(!runtime.audio.musicGain){
+      runtime.audio.musicGain=ctx.createGain();
+      runtime.audio.musicGain.connect(ctx.destination);
+    }
+    if(!(runtime.audio.musicSources instanceof Map))runtime.audio.musicSources=new Map();
+    for(let i=1;i<=AUDIO_TRACK_COUNT;i++){
+      const el=document.getElementById(`music${i}`);if(!el||runtime.audio.musicSources.has(i))continue;
+      try{const src=ctx.createMediaElementSource(el);src.connect(runtime.audio.musicGain);runtime.audio.musicSources.set(i,src);}catch(e){/* already connected or unsupported */}
+    }
+    if(ctx.state==="suspended")ctx.resume().catch(()=>{});
+    return !!runtime.audio.musicGain;
+  }catch(e){console.warn("STADO music mixer",e);return false;}
+}
+function syncAudioElements(){
+  const mixed=!!runtime.audio.musicGain;
+  if(mixed){
+    try{runtime.audio.musicGain.gain.value=runtime.audio.muted?0:clamp(runtime.audio.volume,0,1);}catch{}
+  }
+  for(let i=1;i<=AUDIO_TRACK_COUNT;i++){
+    const el=document.getElementById(`music${i}`);if(!el)continue;
+    if(mixed){el.muted=false;try{el.volume=1;}catch{}}
+    else{el.muted=!!runtime.audio.muted;try{el.volume=runtime.audio.volume;}catch{}}
+  }
+}
+function setAudioVolume(v){runtime.audio.volume=clamp(v,0,1);ensureMusicMixer();syncAudioElements();saveAudioPrefs();}
 function setTickVolume(v){runtime.audio.tickVolume=clamp(v,0,1);syncTimerEndAudio();saveAudioPrefs();}
-function setMuted(v){runtime.audio.muted=!!v;syncAudioElements();saveAudioPrefs();render();}
+function setMuted(v){runtime.audio.muted=!!v;ensureMusicMixer();syncAudioElements();saveAudioPrefs();render();}
 function saveAudioPrefs(){try{localStorage.setItem(AUDIO_STORAGE_KEY,JSON.stringify({prefsVersion:AUDIO_PREFS_VERSION,volume:runtime.audio.volume,muted:runtime.audio.muted,manualTrack:runtime.audio.manualTrack,tickEnabled:runtime.audio.tickEnabled,tickVolume:runtime.audio.tickVolume,endEnabled:runtime.audio.endEnabled}));}catch{}}
 function currentDefaultMusicTrack(){
   const r=runtime.host.room;
@@ -2960,7 +2989,7 @@ function resolveMusicTrack(defaultTrack){const manual=clamp(+(runtime.audio.manu
 function setManualMusicTrack(n){
   runtime.audio.manualTrack=clamp(+n,0,AUDIO_TRACK_COUNT);saveAudioPrefs();
   if(runtime.role!=="host")return;
-  runtime.audio.muted=false;saveAudioPrefs();syncAudioElements();
+  runtime.audio.muted=false;saveAudioPrefs();ensureMusicMixer();syncAudioElements();
   playMusic(currentDefaultMusicTrack(),true);
 }
 function primeMusicTrack(n){
@@ -2980,10 +3009,12 @@ function playMusic(defaultTrack,force=false){
   if(runtime.role==="player")return;
   runtime.audio.defaultTrack=clamp(+defaultTrack,1,AUDIO_TRACK_COUNT);
   const n=resolveMusicTrack(runtime.audio.defaultTrack);
-  runtime.audio.track=n;syncAudioElements();
+  runtime.audio.track=n;ensureMusicMixer();syncAudioElements();
   for(let i=1;i<=AUDIO_TRACK_COUNT;i++){const el=document.getElementById(`music${i}`);if(!el)continue;if(i!==n){el.pause();try{el.currentTime=0;}catch{}}}
   const el=document.getElementById(`music${n}`);if(!el)return;
-  el.loop=true;el.muted=false;el.volume=runtime.audio.muted?0:runtime.audio.volume;
+  el.loop=true;
+  if(runtime.audio.musicGain){el.muted=false;try{el.volume=1;}catch{}}
+  else{el.muted=!!runtime.audio.muted;try{el.volume=runtime.audio.volume;}catch{}}
   if(!el.paused&&!force){runtime.audio.pendingTrack=0;return;}
   const promise=el.play();
   if(promise&&typeof promise.then==="function")promise.then(()=>{runtime.audio.pendingTrack=0;runtime.audio.lastError="";}).catch(err=>{
