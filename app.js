@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.3.2";
+const APP_VERSION = "1.3.3";
 const PROTOCOL_VERSION = "stado-v2";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -142,16 +142,18 @@ const runtime = {
   visual: loadVisualPrefs(),
   data: normalizeQuestionData(rawQuestions),
   quizData: normalizeQuizData(rawQuizQuestions),
+  quizLoad: {ready:!!rawQuizQuestions, loading:false, error:""},
   diagnostics: []
 };
 
 init();
 
 function init(){
-  loadAudioPrefs();
-  applyVisualSettings();
-  validateStaticData();
-  bindGlobalEvents();
+  // Renderowanie startu nie może zależeć od profilu urządzenia, audio ani dużej bazy Quizu.
+  // Dzięki temu iOS/Safari zawsze dostaje działający pierwszy ekran natychmiast.
+  try{ loadAudioPrefs(); }catch(e){ console.warn("STADO audio prefs",e); }
+  try{ bindGlobalEvents(); }catch(e){ console.warn("STADO events",e); }
+  try{ validateStaticData(); }catch(e){ console.warn("STADO static validation",e); }
   const params = new URLSearchParams(location.search);
   const qCode = cleanRoomCode(params.get("room") || params.get("join") || "");
   const qRoomId = params.get("roomId") || "";
@@ -165,10 +167,14 @@ function init(){
       if(savedPlayer.drafts) runtime.player.drafts = {...runtime.player.drafts,...savedPlayer.drafts};
       runtime.player.lastAttemptId = savedPlayer.lastAttemptId || null;
       render();
+      safeApplyVisualSettings();
+      loadQuizDataAsync();
       startPlayerResume();
       return;
     }
     render();
+    safeApplyVisualSettings();
+    loadQuizDataAsync();
     setTimeout(() => previewRoom(qCode), 80);
     return;
   }
@@ -178,9 +184,51 @@ function init(){
   const otherFreshTab = hostLock && !sameTab && Date.now() - hostLock.ts < 9000;
   if(savedHost && !savedHost.closed && !otherFreshTab){
     restoreHostSnapshot();
+    safeApplyVisualSettings();
+    loadQuizDataAsync();
     return;
   }
   render();
+  safeApplyVisualSettings();
+  loadQuizDataAsync();
+}
+
+function safeApplyVisualSettings(){
+  try{ applyVisualSettings(); applyVisualSettingsToDOM(); }
+  catch(e){
+    console.warn("STADO visual settings fallback",e);
+    try{
+      document.documentElement.dataset.deviceProfile="auto";
+      document.documentElement.style.removeProperty("--device-scale");
+    }catch{}
+  }
+}
+
+function loadQuizDataAsync(){
+  if(runtime.quizLoad?.ready || runtime.quizLoad?.loading)return;
+  if(window.STADO_QUIZ){
+    runtime.quizData=normalizeQuizData(window.STADO_QUIZ);
+    runtime.quizLoad.ready=true;
+    return;
+  }
+  runtime.quizLoad.loading=true;
+  const script=document.createElement("script");
+  script.src=`data/quiz.js?v=${APP_VERSION}`;
+  script.async=true;
+  script.onload=()=>{
+    runtime.quizLoad.loading=false;
+    runtime.quizLoad.ready=true;
+    runtime.quizData=normalizeQuizData(window.STADO_QUIZ);
+    try{validateStaticData();}catch{}
+    if(runtime.configDraft?.mode==="quiz" || runtime.host.room?.config?.mode==="quiz")render();
+  };
+  script.onerror=()=>{
+    runtime.quizLoad.loading=false;
+    runtime.quizLoad.error="Nie udało się wczytać data/quiz.js.";
+    console.warn("STADO quiz database failed to load");
+    if(runtime.configDraft?.mode==="quiz")render();
+  };
+  document.head.appendChild(script);
 }
 
 function bindGlobalEvents(){

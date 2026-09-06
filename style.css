@@ -1214,3 +1214,34 @@ html[data-device-profile="phone"] .mode-cards{grid-template-columns:repeat(2,min
 
 /* v1.3.2 — osobny sygnał zakończenia czasu */
 .timer-end-setting{margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.10)}
+
+/* v1.3.3 — bezpieczny start na iPhone/iPad i małych viewportach */
+.startup-fallback{opacity:1}
+.start-shell{width:100%;max-width:100%;overflow:visible}
+@media(max-width:900px){
+  html,body{min-width:0;width:100%;max-width:100%;overflow-x:hidden}
+  body:not(.host-game){overflow-y:auto!important}
+  .start-shell{min-height:100vh;min-height:100svh;height:auto!important;padding:12px!important;display:block!important}
+  .start-shell .topbar{margin-bottom:12px}
+  .start-hero{grid-template-columns:1fr!important;gap:14px!important;max-width:760px!important;margin:0 auto!important}
+  .start-panel{padding:20px!important}
+  .start-panel h1{font-size:clamp(42px,12vw,68px)!important}
+  .start-panel h2{font-size:clamp(20px,6vw,34px)!important;margin-bottom:14px!important}
+  .start-panel p{font-size:clamp(15px,4.4vw,20px)!important}
+  .start-actions{grid-template-columns:1fr!important;gap:10px!important;margin-top:16px!important}
+  .start-action{min-height:82px!important;padding:14px!important}
+  .scene-wrap{min-height:0!important;height:auto!important;padding:8px 0 4px}
+  .scene-wrap img{max-height:38vh!important;width:100%!important;object-fit:contain!important}
+  .start-shell>.spread{margin-top:12px;flex-wrap:wrap}
+  .footer-runway{display:none!important}
+}
+@media(max-width:480px){
+  .start-shell{padding:max(10px,env(safe-area-inset-top)) 10px max(14px,env(safe-area-inset-bottom))!important}
+  .start-panel{padding:16px!important;border-radius:18px!important}
+  .start-panel h1{font-size:44px!important}
+  .start-panel h2{font-size:22px!important}
+  .start-panel p{font-size:16px!important}
+  .start-action{font-size:15px!important}
+  .start-action span{font-size:12px!important}
+  .scene-wrap img{max-height:30vh!important}
+}
