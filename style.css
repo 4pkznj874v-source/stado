@@ -1245,3 +1245,30 @@ html[data-device-profile="phone"] .mode-cards{grid-template-columns:repeat(2,min
   .start-action span{font-size:12px!important}
   .scene-wrap img{max-height:30vh!important}
 }
+
+/* v1.3.5 — controls available directly on pause overlay */
+.pause-overlay .overlay-box{width:min(680px,94vw);padding:24px;border-radius:22px;background:rgba(28,29,57,.96);border:1px solid rgba(255,255,255,.14);box-shadow:0 22px 60px rgba(0,0,0,.38)}
+.pause-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:18px}
+.pause-actions .btn{min-width:170px}
+@media(max-width:620px){.pause-actions{display:grid;grid-template-columns:1fr}.pause-actions .btn{width:100%;min-width:0}}
+
+
+/* v1.3.7 — ustawienia deweloperskie */
+.developer-entry,.developer-tool-card{
+  display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 14px;margin-top:12px;
+  border-radius:14px;background:rgba(125,224,239,.07);border:1px solid rgba(125,224,239,.22)
+}
+.developer-entry>div,.developer-tool-card>div{min-width:0;display:grid;gap:3px}
+.developer-entry .btn,.developer-tool-card .btn{flex:0 0 auto;min-height:42px;padding:9px 14px}
+.developer-settings-modal{width:min(820px,96vw)}
+.developer-heading{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
+.developer-heading h2{margin-bottom:4px}
+.dev-badge{font-weight:1000;letter-spacing:.08em;padding:6px 9px;border-radius:999px;background:rgba(255,79,145,.16);border:1px solid rgba(255,79,145,.45);color:#ff91bb}
+.dev-section{display:grid;gap:10px;margin-top:13px;padding:12px 13px;border-radius:14px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08)}
+.developer-settings-modal .countdown-sound-settings{margin-top:13px}
+.developer-reset-row{margin-top:12px}
+.user-audio-settings{padding:12px 13px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+@media(max-width:680px){
+  .developer-entry,.developer-tool-card{align-items:stretch;flex-direction:column}
+  .developer-entry .btn,.developer-tool-card .btn{width:100%}
+}

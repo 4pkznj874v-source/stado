@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.3.4";
+const APP_VERSION = "1.3.7";
 const PROTOCOL_VERSION = "stado-v2";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -42,11 +42,11 @@ const ALL_QUIZ_CATEGORY_KEYS = QUIZ_CATEGORIES.map(x=>x.key);
 const CONFIG_HELP = {
   timer: "Każda faza gry dostaje własny pełny limit czasu od 10 do 120 sekund. Jeśli gracz nie odda głosu w czasie, w tej rundzie dostaje 0 pkt. W fazie pisania po upływie czasu brakująca odpowiedź nie trafia do głosowania.",
   answers: "Rekomendacja: 3–4 Owce → 3 odpowiedzi, 5–8 → 4, 9–12 → 5. Jeżeli graczy jest mniej niż wybrana liczba odpowiedzi, gra automatycznie ogranicza liczbę odpowiedzi do liczby aktywnych Owiec.",
-  wolf: "Wilk to opcjonalna tajna minigra po oddaniu głosu w zwykłych rundach. Nie występuje w Quizie ani w rundach „Co zrobi dana Owca?”. Trafienie daje +1 Wilkowi i może odebrać do 2 pkt celowi; pudło kosztuje Wilka 1 pkt; rezygnacja = 0.",
+  wolf: "Wilk to opcjonalna tajna minigra po oddaniu głosu w zwykłych rundach. Nie występuje w Quizie ani w rundach „Co zrobi dana Owca?”. Trafienie daje +1 pkt Wilkowi i może odebrać do 2 pkt celowi; pudło kosztuje Wilka 1 pkt; rezygnacja = 0.",
   quiz: "Quiz ma zawsze 5 odpowiedzi i dokładnie jedną poprawną. Minimum 2 graczy. Przed pierwszym blokiem oraz po każdych 5 pytaniach Stado głosuje na kategorię kolejnych pytań, jeśli w ustawieniach wybrano co najmniej 2 kategorie. Każdy zaczyna z 1 Żetonem Wełny: można użyć go do punktacji ×2, dać +10 dodatkowych głosów przy wyborze kategorii albo zachować na finał za +1 pkt.",
   quizCategories: "Domyślnie aktywne są wszystkie 10 kategorii. Przed blokiem pytań gra losuje maksymalnie 4 z wcześniej zaznaczonych kategorii i gracze wybierają jedną. Przy 2–4 zaznaczonych kategoriach do głosowania trafiają wszystkie. Jeśli zaznaczona jest tylko 1 kategoria, głosowanie jest pomijane.",
   modeWarmup: "Rozgrzewka: gra daje pytania i gotowe odpowiedzi. Najszybszy wariant bez pisania. W pytaniach typu „Która Owca?” nadal obowiązuje zwykła punktacja Stada.",
-  modeFreestyle: "Freestyle: pytania daje gra, a wybrane Owce tworzą odpowiedzi. Autor najczęściej wybranej odpowiedzi może zdobyć Żeton Wełny.",
+  modeFreestyle: "Freestyle: pytania daje gra, a wybrane Owce tworzą odpowiedzi. Autor najczęściej wybranej odpowiedzi może zdobyć +1 Żeton Wełny.",
   modeHardcore: "Sandbox: Baran tworzy pytanie, a przy pytaniu otwartym wybrane Owce tworzą odpowiedzi. To najbardziej kreatywny wariant gry.",
   modeQuiz: "Quiz: 5 odpowiedzi, dokładnie jedna poprawna. Wybierasz poziom i pulę kategorii. Przed kolejnymi blokami maksymalnie 5 pytań gracze głosują na kategorię. Bez Czarnej Owcy i Wilka.",
   questionTypes: "W STADO są trzy rodzaje rund społecznych: 1) „Co robi Stado?” — wybieracie odpowiedź i liczy się największe Stado; 2) „Która Owca?” — wskazujecie osobę i nadal liczy się największe Stado; 3) „Co zrobi dana Owca?” — losowana jest Owca pod lupą, która wybiera swoją odpowiedź i zawsze dostaje +1 pkt, a pozostali próbują przewidzieć jej wybór za +2 pkt (lub +4 z Żetonem).",
@@ -70,7 +70,7 @@ const PLAYER_STORAGE_KEY = `stado:${pathKey}:player`;
 const AUDIO_STORAGE_KEY = `stado:${pathKey}:audio`;
 const VISUAL_STORAGE_KEY = `stado:${pathKey}:visual`;
 const AUDIO_TRACK_COUNT=10;
-const AUDIO_PREFS_VERSION=2;
+const AUDIO_PREFS_VERSION=3;
 const VISUAL_DEFAULTS={configLeft:100,configRight:105,lobby:100,prologue:100,players:100,question:100,answers:85,info:115,history:115,points:115,timer:115,final:100};
 const VISUAL_RANGES={
   configLeft:{min:75,max:125,step:5},configRight:{min:75,max:150,step:5},lobby:{min:75,max:135,step:5},prologue:{min:75,max:135,step:5},
@@ -138,7 +138,7 @@ const runtime = {
     drafts:{question:"", answer:"", hardcoreType:"open", voteOptionId:"", useToken:false, huntTargetId:"", huntOptionId:"", categoryKey:"", categoryUseToken:false, categoryTieKey:""},
     waitingRecovery:false, reconnecting:false, lastAttemptId:null
   },
-  audio: {track:0, defaultTrack:1, manualTrack:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:"", tickEnabled:true, tickVolume:1, endEnabled:true, lastTickKey:"", lastEndKey:"", tickContext:null, musicContext:null, musicGain:null, musicSources:new Map()},
+  audio: {track:0, defaultTrack:7, manualTrack:0, volume:.35, muted:false, pausedByGame:false, pendingTrack:0, lastError:"", tickEnabled:true, tickVolume:1, endEnabled:true, lastTickKey:"", lastEndKey:"", tickContext:null, musicContext:null, musicGain:null, musicSources:new Map()},
   visual: loadVisualPrefs(),
   data: normalizeQuestionData(rawQuestions),
   quizData: normalizeQuizData(rawQuizQuestions),
@@ -279,7 +279,7 @@ function handleClick(e){
   if(a === "create-game"){
     runtime.role = "host";
     setBodyMode();
-    playMusic(1);
+    playMusic(7);
     render();
     return;
   }
@@ -294,10 +294,13 @@ function handleClick(e){
   if(a === "back-start"){
     if(runtime.host.room) return;
     if(runtime.role==="host") resetPresentationPrefs();
-    runtime.role = "start"; pauseAllMusic(); render(); return;
+    runtime.role = "start"; pauseAllMusic(); render(); playMusic(7,true); return;
   }
   if(a === "open-settings"){ runtime.modal = {type:"settings"}; render(); return; }
-  if(a === "open-graphics-settings"){ runtime.modal = {type:"graphics-settings",screen:currentVisualScreen()}; render(); return; }
+  if(a === "open-developer-settings"){ runtime.modal = {type:"developer-settings"}; render(); return; }
+  if(a === "back-settings"){ runtime.modal = {type:"settings"}; render(); return; }
+  if(a === "back-developer-settings"){ runtime.modal = {type:"developer-settings"}; render(); return; }
+  if(a === "open-graphics-settings"){ runtime.modal = {type:"graphics-settings",screen:currentVisualScreen(),returnTo:"developer-settings"}; render(); return; }
   if(a === "visual-reset"){ resetCurrentVisualScreen(); saveVisualPrefs(); applyVisualSettings(); render(); return; }
   if(a === "device-profile"){
     const profile=String(value||"auto");
@@ -305,7 +308,12 @@ function handleClick(e){
     return;
   }
   if(a === "music-default"){ runtime.audio.manualTrack=0;saveAudioPrefs();playMusic(currentDefaultMusicTrack(),true);render();return; }
-  if(a === "audio-volume-reset"){ runtime.audio.volume=.35;runtime.audio.tickVolume=1;runtime.audio.muted=false;syncAudioElements();syncTimerEndAudio();saveAudioPrefs();render();return; }
+  if(a === "audio-volume-reset"){ runtime.audio.volume=.35;runtime.audio.muted=false;syncAudioElements();saveAudioPrefs();render();return; }
+  if(a === "developer-audio-reset"){
+    runtime.audio.manualTrack=0;runtime.audio.tickEnabled=true;runtime.audio.tickVolume=1;runtime.audio.endEnabled=true;
+    runtime.audio.lastTickKey="";runtime.audio.lastEndKey="";
+    syncTimerEndAudio();saveAudioPrefs();playMusic(currentDefaultMusicTrack(),true);render();return;
+  }
   if(a === "close-modal"){ hideFloatingTooltip(); runtime.modal = null; render(); return; }
 
   if(a === "settings-new-game"){
@@ -827,7 +835,7 @@ function createHostPeerNew(cfg,tries){
   let opened=false;
   peer.on("open",()=>{
     opened=true; runtime.host.creating=false; runtime.host.room=room; setupHostPeerHandlers(peer); persistHost();
-    playMusic(1); requestWakeLock(); commitHost("Pokój gotowy");
+    playMusic(7); requestWakeLock(); commitHost("Pokój gotowy");
   });
   peer.on("error",err=>{
     if(!opened && err?.type==="unavailable-id"){ try{peer.destroy();}catch{} createHostPeerNew(cfg,tries+1); }
@@ -1680,7 +1688,7 @@ function hostNewGame(){
   stopPrologueTimer();
   activePlayers(r).forEach(p=>{p.points=0;p.tokens=startingTokens(r);p.stats=makeStats();p.replayReady=false;});
   r.match=null;r.status="CONFIG";r.paused=false;r.actionLog={};runtime.configDraft=ensureQuizConfig({...r.config});
-  playMusic(1);commitHost("Nowa gra — konfiguracja");
+  playMusic(7);commitHost("Nowa gra — konfiguracja");
 }
 
 function hostCloseRoom(){
@@ -1690,7 +1698,7 @@ function hostCloseRoom(){
   stopPrologueTimer();releaseWakeLock();releaseHostLock();
   try{runtime.host.peer?.destroy();}catch{}
   localStorage.removeItem(HOST_STORAGE_KEY);runtime.host.room=null;runtime.host.peer=null;runtime.host.conns.clear();runtime.host.playerConns.clear();
-  runtime.role="start";runtime.modal=null;pauseAllMusic();resetPresentationPrefs();render();
+  runtime.role="start";runtime.modal=null;pauseAllMusic();resetPresentationPrefs();render();playMusic(7,true);
 }
 
 function hostTogglePause(){
@@ -2279,10 +2287,10 @@ function renderConfig(room=null){
 }
 
 function renderConfigScoring(cfg){
-  if(cfg.mode==="quiz")return `<div class="config-score-groups one"><div class="config-score-group"><h4>🧠 Quiz</h4><div class="config-score-row"><b>✅ +2</b><span>poprawna odpowiedź</span></div><div class="config-score-row"><b>❌ 0</b><span>błędna / brak</span></div><div class="config-score-row"><b>🧶 ×2</b><span>poprawna odpowiedź = +4</span></div><div class="config-score-row"><b>🗳 🧶 +10</b><span>dodatkowych głosów na kategorię</span></div><div class="config-score-row"><b>🧶 +1</b><span>zachowany Żeton w finale</span></div><div class="config-score-row"><b>START: 1 🧶</b><span>wybierasz: kategoria, ×2 albo finał</span></div></div></div>`;
-  const author=cfg.mode!=="warmup"?`<div class="config-score-row"><b>✍️ +1 🧶</b><span>autor najczęściej wybranej odpowiedzi — tylko gdy gracze piszą odpowiedzi</span></div>`:"";
-  const wolf=cfg.wolfEnabled?`<div class="config-score-row"><b>🐺</b><span>zwykłe rundy: trafienie +1 / cel −2 • pudło −1</span></div>`:"";
-  return `<div class="config-score-groups"><div class="config-score-group"><h4>🐑 Co robi Stado? / Która Owca?</h4><div class="config-score-row"><b>+2</b><span>największe Stado</span></div><div class="config-score-row"><b>+1</b><span>remis największych Stad</span></div><div class="config-score-row"><b>🖤 +3</b><span>jedyna samotna Czarna Owca</span></div><div class="config-score-row"><b>🧶 ×2</b><span>podwaja Twój wynik za głos</span></div>${author}${wolf}</div><div class="config-score-group accent"><h4>🔎 Co zrobi dana Owca?</h4><div class="config-score-row"><b>🔎 +1</b><span>Owca pod lupą — zawsze</span></div><div class="config-score-row"><b>🎯 +2</b><span>trafisz jej wybór</span></div><div class="config-score-row"><b>❌ 0</b><span>pudło</span></div><div class="config-score-row"><b>🧶 ×2</b><span>trafienie = +4</span></div></div></div>`;
+  if(cfg.mode==="quiz")return `<div class="config-score-groups one"><div class="config-score-group"><h4>🧠 Quiz</h4><div class="config-score-row"><b>✅ +2 pkt</b><span>poprawna odpowiedź</span></div><div class="config-score-row"><b>❌ 0 pkt</b><span>błędna / brak</span></div><div class="config-score-row"><b>🧶 ×2</b><span>poprawna odpowiedź = +4 pkt</span></div><div class="config-score-row"><b>🗳 🧶 +10 głosów</b><span>przy wyborze kategorii</span></div><div class="config-score-row"><b>🧶 +1 pkt</b><span>za zachowany Żeton Wełny w finale</span></div><div class="config-score-row"><b>START: 1 Żeton Wełny</b><span>wybierasz: kategoria, ×2 albo finał</span></div></div></div>`;
+  const author=cfg.mode!=="warmup"?`<div class="config-score-row"><b>✍️ +1 Żeton Wełny</b><span>autor najczęściej wybranej odpowiedzi — tylko gdy gracze piszą odpowiedzi</span></div>`:"";
+  const wolf=cfg.wolfEnabled?`<div class="config-score-row"><b>🐺</b><span>zwykłe rundy: trafienie +1 pkt / cel −2 pkt • pudło −1 pkt</span></div>`:"";
+  return `<div class="config-score-groups"><div class="config-score-group"><h4>🐑 Co robi Stado? / Która Owca?</h4><div class="config-score-row"><b>+2 pkt</b><span>największe Stado</span></div><div class="config-score-row"><b>+1 pkt</b><span>remis największych Stad</span></div><div class="config-score-row"><b>🖤 +3 pkt</b><span>jedyna samotna Czarna Owca</span></div><div class="config-score-row"><b>🧶 ×2</b><span>podwaja punkty za Twój głos</span></div>${author}${wolf}</div><div class="config-score-group accent"><h4>🔎 Co zrobi dana Owca?</h4><div class="config-score-row"><b>🔎 +1 pkt</b><span>Owca pod lupą — zawsze</span></div><div class="config-score-row"><b>🎯 +2 pkt</b><span>trafisz jej wybór</span></div><div class="config-score-row"><b>❌ 0 pkt</b><span>pudło</span></div><div class="config-score-row"><b>🧶 ×2</b><span>trafienie = +4 pkt</span></div></div></div>`;
 }
 
 function renderQuizConfigControls(cfg){
@@ -2482,10 +2490,10 @@ function renderHostStatus(c,r){
       if(choice)lines.push(`🔎 ${esc(focus?.name||"Owca pod lupą")} wybrała: <b>${esc(optionLabel(c,choice,true))}</b>.`);
       else lines.push(`⏱ Owca pod lupą nie odpowiedziała — przewidywania bez punktów.`);
       const hits=Object.values(st.ledger||{}).filter(L=>L.voteAward==="target_correct").length;
-      lines.push(`🎯 Trafiło: <b>${hits}/${Math.max(0,activePlayers(r).length-1)}</b>. Owca pod lupą: <b>+1</b>.`);
+      lines.push(`🎯 Trafiło: <b>${hits}/${Math.max(0,activePlayers(r).length-1)}</b>. Owca pod lupą: <b>+1 pkt</b>.`);
     }else{
-      lines.push(st.tiedTop?`🤝 Remis największych Stad — po <b>+1</b>.`:`🐑 Największe Stado zdobywa <b>+2</b>.`);
-      if(st.blackOptionId){const pid=(st.voterMap[st.blackOptionId]||[])[0];lines.push(`🖤 Czarna Owca: <b>${esc(playerById(pid)?.name||"Owca")}</b> (+3).`);}else lines.push(`🖤 Brak unikalnej Czarnej Owcy.`);
+      lines.push(st.tiedTop?`🤝 Remis największych Stad — po <b>+1 pkt</b>.`:`🐑 Największe Stado zdobywa <b>+2 pkt</b>.`);
+      if(st.blackOptionId){const pid=(st.voterMap[st.blackOptionId]||[])[0];lines.push(`🖤 Czarna Owca: <b>${esc(playerById(pid)?.name||"Owca")}</b> (+3 pkt).`);}else lines.push(`🖤 Brak unikalnej Czarnej Owcy.`);
     }
     if(st.wolfResult)lines.push(wolfResultText(r,c,st.wolfResult));
   }else if(c.phase==="NO_QUESTIONS")lines.push("⚠️ Skończyła się pula prawidłowych pytań.");
@@ -2504,11 +2512,11 @@ function renderHistory(r){
 function renderScoreRules(r){
   const c=currentAttempt(r);
   if(r.config.mode==="quiz"){
-    if(c?.type==="quiz_category_vote")return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🗳 1</b><span>ZWYKŁY GŁOS</span></div><div class="score-rule"><b>🧶 +10</b><span>GŁOSÓW</span></div><div class="score-rule"><b>🤝 🐏</b><span>REMIS = BARAN</span></div><div class="score-rule"><b>🧶 +1</b><span>FINAŁ</span></div></div>`;
-    return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>✅ +2</b><span>DOBRA</span></div><div class="score-rule"><b>❌ 0</b><span>BŁĄD</span></div><div class="score-rule"><b>🧶 ×2</b><span>= +4</span></div><div class="score-rule"><b>🧶 +1</b><span>FINAŁ / SZT.</span></div></div>`;
+    if(c?.type==="quiz_category_vote")return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🗳 1 głos</b><span>ZWYKŁY GŁOS</span></div><div class="score-rule"><b>🧶 +10 głosów</b><span>Z ŻETONEM</span></div><div class="score-rule"><b>🤝 🐏</b><span>REMIS = BARAN</span></div><div class="score-rule"><b>🧶 +1 pkt</b><span>ZA ŻETON W FINALE</span></div></div>`;
+    return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>✅ +2 pkt</b><span>DOBRA</span></div><div class="score-rule"><b>❌ 0 pkt</b><span>BŁĄD</span></div><div class="score-rule"><b>🧶 ×2</b><span>= +4 pkt</span></div><div class="score-rule"><b>🧶 +1 pkt</b><span>FINAŁ / ŻETON</span></div></div>`;
   }
-  if(c?.type==="target")return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🔎 +1</b><span>OWCA POD LUPĄ</span></div><div class="score-rule"><b>🎯 +2</b><span>TRAFIENIE</span></div><div class="score-rule"><b>❌ 0</b><span>PUDŁO</span></div><div class="score-rule"><b>🧶 ×2</b><span>= +4</span></div></div>`;
-  return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🐑 +2</b><span>STADO</span></div><div class="score-rule"><b>🤝 +1</b><span>REMIS</span></div><div class="score-rule"><b>🖤 +3</b><span>CZARNA</span></div><div class="score-rule"><b>🧶 ×2</b><span>TWÓJ GŁOS</span></div>${r.config.mode!=="warmup"&&c?.type!=="which_sheep"?`<div class="score-rule"><b>✍️ +1 🧶</b><span>AUTOR</span></div>`:""}${r.config.wolfEnabled?`<div class="score-rule"><b>🐺 +1/−1</b><span>CEL −2</span></div>`:""}</div>`;
+  if(c?.type==="target")return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🔎 +1 pkt</b><span>OWCA POD LUPĄ</span></div><div class="score-rule"><b>🎯 +2 pkt</b><span>TRAFIENIE</span></div><div class="score-rule"><b>❌ 0 pkt</b><span>PUDŁO</span></div><div class="score-rule"><b>🧶 ×2</b><span>= +4 pkt</span></div></div>`;
+  return `<div class="score-rules score-rules-simple"><div class="score-rule"><b>🐑 +2 pkt</b><span>STADO</span></div><div class="score-rule"><b>🤝 +1 pkt</b><span>REMIS</span></div><div class="score-rule"><b>🖤 +3 pkt</b><span>CZARNA</span></div><div class="score-rule"><b>🧶 ×2</b><span>TWÓJ GŁOS</span></div>${r.config.mode!=="warmup"&&c?.type!=="which_sheep"?`<div class="score-rule"><b>✍️ +1 Żeton Wełny</b><span>AUTOR</span></div>`:""}${r.config.wolfEnabled?`<div class="score-rule"><b>🐺 +1/−1 pkt</b><span>CEL −2 pkt</span></div>`:""}</div>`;
 }
 function progressHTML(done,total){const pct=total?Math.round(done/total*100):0;return `<div class="host-status-line"><div class="progressbar" style="--pct:${pct}%"><span></span></div><b>${done}/${total}</b></div>`;}
 
@@ -2645,15 +2653,15 @@ function renderTokenChooser(s){
 }
 function renderWolf(c,s){
   const d=runtime.player.drafts,targets=s.players.filter(p=>p.playerId!==s.self.playerId),selectedTarget=targets.find(p=>p.playerId===d.huntTargetId);
-  return `<div class="wolf-box"><h2>🐺 Czas na polowanie!</h2><p>Twój głos jest zapisany. Teraz możesz przewidzieć ruch jednej konkretnej Owcy — albo odpuścić.</p><h3>1. Kogo obserwujesz?</h3><div class="wolf-choice-grid">${targets.map(p=>{const sh=sheepById(p.sheepId);return `<button class="wolf-target ${d.huntTargetId===p.playerId?"selected":""}" data-action="select-hunt-target" data-id="${p.playerId}">${imgHTML(sh.smallAvatar,sh.name)}<b>${esc(p.name)}</b></button>`;}).join("")}</div><h3>2. Na co według Ciebie zagłosuje ${selectedTarget?esc(selectedTarget.name):"ta Owca"}?</h3>${c.type==="which_sheep"?`<div class="phone-sheep-grid">${c.options.map(o=>{const pp=s.players.find(x=>x.playerId===o.candidatePlayerId),sh=sheepById(pp?.sheepId);return `<button class="phone-sheep-option ${d.huntOptionId===o.optionId?"selected":""}" data-action="select-hunt-option" data-id="${o.optionId}">${imgHTML(sh.smallAvatar,sh.name)}<strong>${esc(pp?.name||"Owca")}</strong></button>`;}).join("")}</div>`:`<div class="phone-answer-list">${c.options.map((o,i)=>`<button class="phone-answer ${COLORS[i]?.key||o.colorKey} ${d.huntOptionId===o.optionId?"selected":""}" data-action="select-hunt-option" data-id="${o.optionId}">${COLORS[i]?.letter||o.letter} — ${esc(o.text)}</button>`).join("")}</div>`}<div class="hint-box" style="margin-top:12px">🎯 Trafienie: <b>+1 dla Ciebie, −2 dla ofiary</b><br>💨 Pudło: <b>−1 dla Ciebie</b><br>🚫 Rezygnacja: bez zmian.</div><div class="row wrap" style="margin-top:12px"><button class="btn" data-action="submit-hunt" ${d.huntTargetId&&d.huntOptionId?"":"disabled"}>🐺 POLUJĘ</button><button class="btn secondary" data-action="skip-hunt">NIE POLUJĘ W TEJ RUNDZIE</button></div></div>`;
+  return `<div class="wolf-box"><h2>🐺 Czas na polowanie!</h2><p>Twój głos jest zapisany. Teraz możesz przewidzieć ruch jednej konkretnej Owcy — albo odpuścić.</p><h3>1. Kogo obserwujesz?</h3><div class="wolf-choice-grid">${targets.map(p=>{const sh=sheepById(p.sheepId);return `<button class="wolf-target ${d.huntTargetId===p.playerId?"selected":""}" data-action="select-hunt-target" data-id="${p.playerId}">${imgHTML(sh.smallAvatar,sh.name)}<b>${esc(p.name)}</b></button>`;}).join("")}</div><h3>2. Na co według Ciebie zagłosuje ${selectedTarget?esc(selectedTarget.name):"ta Owca"}?</h3>${c.type==="which_sheep"?`<div class="phone-sheep-grid">${c.options.map(o=>{const pp=s.players.find(x=>x.playerId===o.candidatePlayerId),sh=sheepById(pp?.sheepId);return `<button class="phone-sheep-option ${d.huntOptionId===o.optionId?"selected":""}" data-action="select-hunt-option" data-id="${o.optionId}">${imgHTML(sh.smallAvatar,sh.name)}<strong>${esc(pp?.name||"Owca")}</strong></button>`;}).join("")}</div>`:`<div class="phone-answer-list">${c.options.map((o,i)=>`<button class="phone-answer ${COLORS[i]?.key||o.colorKey} ${d.huntOptionId===o.optionId?"selected":""}" data-action="select-hunt-option" data-id="${o.optionId}">${COLORS[i]?.letter||o.letter} — ${esc(o.text)}</button>`).join("")}</div>`}<div class="hint-box" style="margin-top:12px">🎯 Trafienie: <b>+1 pkt dla Ciebie, −2 pkt dla ofiary</b><br>💨 Pudło: <b>−1 pkt dla Ciebie</b><br>🚫 Rezygnacja: bez zmian.</div><div class="row wrap" style="margin-top:12px"><button class="btn" data-action="submit-hunt" ${d.huntTargetId&&d.huntOptionId?"":"disabled"}>🐺 POLUJĘ</button><button class="btn secondary" data-action="skip-hunt">NIE POLUJĘ W TEJ RUNDZIE</button></div></div>`;
 }
 function renderPhoneRoundResult(c,s){
   const x=c.settlement,L=x?.ledger;if(!x||!L)return renderPhoneWait("Wyniki rundy","Spójrz na ekran główny.","assets/phone/czekatel.png");
   const isQuiz=c.type==="quiz",isTarget=c.type==="target";
-  const baseText=L.timedOut&&L.voteAward!=="target_focus"?"Brak głosu w czasie":L.voteAward==="quiz_correct"?"Poprawna odpowiedź":L.voteAward==="quiz_wrong"?"Błędna odpowiedź":L.voteAward==="target_correct"?"Trafione!":L.voteAward==="target_wrong"?"Nie tym razem":L.voteAward==="target_focus"?"Owca pod lupą — +1":L.voteAward==="target_no_key"?"Brak wyboru Owcy pod lupą":L.voteAward==="black"?"Czarna Owca":L.voteAward==="herd"?"Największe Stado":L.voteAward==="tie"?"Remis największych Stad":"Poza punktami";
+  const baseText=L.timedOut&&L.voteAward!=="target_focus"?"Brak głosu w czasie":L.voteAward==="quiz_correct"?"Poprawna odpowiedź":L.voteAward==="quiz_wrong"?"Błędna odpowiedź":L.voteAward==="target_correct"?"Trafione!":L.voteAward==="target_wrong"?"Nie tym razem":L.voteAward==="target_focus"?"Owca pod lupą — +1 pkt":L.voteAward==="target_no_key"?"Brak wyboru Owcy pod lupą":L.voteAward==="black"?"Czarna Owca":L.voteAward==="herd"?"Największe Stado":L.voteAward==="tie"?"Remis największych Stad":"Poza punktami";
   const correctQuiz=isQuiz?x.optionResults?.find(o=>o.optionId===x.correctOptionId):null;
   const targetChoice=isTarget?x.optionResults?.find(o=>o.optionId===x.targetCorrectOptionId):null;
-  return `<div class="result-box"><h2>Wynik rundy</h2><div class="result-row"><span>Twój wynik</span><b>${baseText}</b></div>${isQuiz?`<div class="result-row"><span>Poprawna odpowiedź</span><b>${esc(correctQuiz?.text||"—")}</b></div>`:""}${isTarget?`<div class="result-row"><span>Wybór Owcy pod lupą</span><b>${esc(targetChoice?.text||"brak")}</b></div>`:""}<div class="result-row"><span>Punkty${L.tokenUsed?" z Żetonem ×2":""}</span><b>${signed(L.votePoints||0)}</b></div>${L.authorToken?`<div class="result-row"><span>Twoja odpowiedź wygrała</span><b>+${L.authorToken} 🧶</b></div>`:""}${L.wolfDelta?`<div class="result-row"><span>Rozliczenie Wilka</span><b>${signed(L.wolfDelta)} pkt</b></div>`:""}<div class="result-row"><span>Stan po rundzie</span><b>${L.after} pkt • 🧶 ${s.self.tokens}</b></div>${x.wolfResult?`<div class="hint-box" style="margin-top:12px">${wolfResultTextFromSnapshot(s,c,x.wolfResult)}</div>`:""}<p class="muted center">Następną rundę uruchamia prowadzący.</p></div>`;
+  return `<div class="result-box"><h2>Wynik rundy</h2><div class="result-row"><span>Twój wynik</span><b>${baseText}</b></div>${isQuiz?`<div class="result-row"><span>Poprawna odpowiedź</span><b>${esc(correctQuiz?.text||"—")}</b></div>`:""}${isTarget?`<div class="result-row"><span>Wybór Owcy pod lupą</span><b>${esc(targetChoice?.text||"brak")}</b></div>`:""}<div class="result-row"><span>Punkty${L.tokenUsed?" z Żetonem ×2":""}</span><b>${signed(L.votePoints||0)}</b></div>${L.authorToken?`<div class="result-row"><span>Twoja odpowiedź wygrała</span><b>+${L.authorToken} Żeton Wełny</b></div>`:""}${L.wolfDelta?`<div class="result-row"><span>Rozliczenie Wilka</span><b>${signed(L.wolfDelta)} pkt</b></div>`:""}<div class="result-row"><span>Stan po rundzie</span><b>${L.after} pkt • 🧶 ${s.self.tokens}</b></div>${x.wolfResult?`<div class="hint-box" style="margin-top:12px">${wolfResultTextFromSnapshot(s,c,x.wolfResult)}</div>`:""}<p class="muted center">Następną rundę uruchamia prowadzący.</p></div>`;
 }
 function renderPhoneFinal(s){
   const f=s.match.finalResult,me=s.self,sh=sheepById(me.sheepId),sum=s.match.personalSummary||{sentences:[]};
@@ -2708,6 +2716,7 @@ function renderModal(){
   else if(m.type==="help-info")body=`<div class="modal card info-modal"><h2>ℹ Informacja</h2><p>${esc(m.text||"")}</p><div class="modal-actions"><button class="btn" data-action="close-modal">Rozumiem</button></div></div>`;
   else if(m.type==="quiz-categories")body=renderQuizCategoriesModal();
   else if(m.type==="graphics-settings")body=renderGraphicsSettingsModal();
+  else if(m.type==="developer-settings")body=renderDeveloperSettingsModal();
   else if(m.type==="settings")body=renderSettingsModal();
   root.innerHTML=body;document.body.appendChild(root);afterModalRender();
 }
@@ -2723,21 +2732,34 @@ function renderSettingsModal(){
   if(runtime.role==="player")return `<div class="modal card"><h2>⚙ Ustawienia telefonu</h2><div class="info-list"><div class="info-item">Połączenie: <b>${runtime.player.connected?"online":"offline"}</b></div><div class="info-item">Wersja: <b>${APP_VERSION}</b></div><div class="info-item">Telefon gracza nie odtwarza muzyki ani efektów dźwiękowych.</div></div><div class="modal-actions"><button class="btn secondary" data-action="player-reconnect">Połącz ponownie</button><button class="btn ghost" data-action="player-menu">Wyjdź do menu</button><button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
   const r=runtime.host.room;
   const volume=Math.round(runtime.audio.volume*100);
+  return `<div class="modal card settings-modal"><h2>⚙ Ustawienia <span class="app-version">v${APP_VERSION}</span></h2>
+    <div class="settings-section music-settings-section user-audio-settings">
+      <div class="spread"><label class="form-label">🎵 Głośność muzyki</label><span class="settings-track-badge" data-music-volume-value>${volume}%</span></div><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1">
+      <label class="row settings-mute"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label>
+      <div class="row wrap audio-reset-row"><button class="btn ghost" data-action="audio-volume-reset">↺ DOMYŚLNA GŁOŚNOŚĆ</button><span class="small muted">Muzyka 35%</span></div>
+    </div>
+    <div class="developer-entry"><div><b>🛠 Ustawienia deweloperskie</b><div class="small muted">Wybór muzyki dla etapów, grafika oraz sygnały stopera.</div></div><button class="btn secondary" data-action="open-developer-settings">OTWÓRZ</button></div>
+    ${r?`<div class="info-item settings-room"><b>Pokój ${esc(r.roomCode)}</b><div id="settingsQR" data-qr="${escAttr(joinURL(r))}" class="settings-qr"></div><div class="small center muted">Zeskanuj, aby wrócić do pokoju.</div></div><div class="manage-list">${activePlayers(r).map(p=>`<div class="manage-row">${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))} • ${p.connected||p.isBot?"online":"offline"}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}">Usuń</button></div>`).join("")}</div>`:""}
+    <div class="modal-actions">${r&&["ROUND","PROLOGUE"].includes(r.status)?`<button class="btn secondary" data-action="pause">${r.paused?"Wznów":"Pauza"}</button>`:""}${r&&r.status==="ROUND"&&r.match?.current&&!r.match.current.settlement?`<button class="btn secondary" data-action="abort-round">Pomiń pytanie</button>`:""}${r?`<button class="btn yellow" data-action="settings-new-game">↻ USTAW GRĘ OD NOWA</button>`:""}${r?`<button class="btn danger" data-action="settings-exit-menu">WYJDŹ DO MENU GŁÓWNEGO</button>`:""}<button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
+}
+function renderDeveloperSettingsModal(){
   const defaultTrack=currentDefaultMusicTrack();
   const selected=clamp(+(runtime.audio.manualTrack||0),0,AUDIO_TRACK_COUNT);
   const musicOptions=[`<option value="0" ${selected===0?"selected":""}>Domyślna dla etapu (teraz: utwór ${defaultTrack})</option>`,...Array.from({length:AUDIO_TRACK_COUNT},(_,i)=>i+1).map(n=>`<option value="${n}" ${selected===n?"selected":""}>Utwór ${n}</option>`)].join("");
-  return `<div class="modal card settings-modal"><h2>⚙ Ustawienia <span class="app-version">v${APP_VERSION}</span></h2>
-    <div class="settings-section music-settings-section">
-      <div class="config-label-row"><label class="form-label">🎵 Muzyka</label>${infoTip("music","Jak działa wybór muzyki?")}</div>
+  return `<div class="modal card developer-settings-modal"><div class="developer-heading"><div><h2>🛠 Ustawienia deweloperskie</h2><p class="small muted">Zaawansowane opcje wyglądu, muzyki etapów i sygnałów stopera. Do zwykłej rozgrywki nie trzeba ich zmieniać.</p></div><span class="dev-badge">DEV</span></div>
+    <div class="settings-section dev-section">
+      <div class="config-label-row"><label class="form-label">🎵 Muzyka przypisana do etapu</label>${infoTip("music","Jak działa wybór muzyki?")}</div>
       <div class="music-choice-row"><select class="select" data-music-track>${musicOptions}</select><button class="btn secondary music-default-btn" data-action="music-default">↺ Domyślna</button></div>
-      <div class="spread"><label class="form-label">Głośność muzyki</label><span class="settings-track-badge" data-music-volume-value>${volume}%</span></div><input type="range" min="0" max="100" value="${volume}" data-hostvolume="1">
-      <label class="row settings-mute"><input type="checkbox" data-mute ${runtime.audio.muted?"checked":""}> Wycisz muzykę</label>
-      <div class="countdown-sound-settings"><div class="spread"><span class="setting-title">⏱ Piknięcie ostatnich 5 sekund ${infoTip("countdownTick","Jak działa sygnał końcówki?")}</span><label class="switch" aria-label="Włącz lub wyłącz piknięcia stopera"><input type="checkbox" data-tick-enabled ${runtime.audio.tickEnabled?"checked":""}><span></span></label></div><div class="spread timer-end-setting"><span class="setting-title">🔔 Dźwięk końca czasu 0:00 ${infoTip("timerEnd","Co dzieje się przy 0:00?")}</span><label class="switch" aria-label="Włącz lub wyłącz dźwięk końca czasu"><input type="checkbox" data-end-sound-enabled ${runtime.audio.endEnabled?"checked":""}><span></span></label></div><div class="spread tick-volume-label"><span>Głośność sygnałów stopera</span><b data-tick-volume-value>${Math.round(runtime.audio.tickVolume*100)}%</b></div><input type="range" min="0" max="100" step="5" value="${Math.round(runtime.audio.tickVolume*100)}" data-tick-volume="1"></div>
-      <div class="row wrap audio-reset-row"><button class="btn ghost" data-action="audio-volume-reset">↺ DOMYŚLNE GŁOŚNOŚCI</button><span class="small muted">Muzyka 35% • piknięcie 100%</span></div>
-      <div class="row wrap settings-tools"><button class="btn secondary" data-action="open-graphics-settings">🎨 USTAWIENIA GRAFIKI</button>${infoTip("visualSettings","Co można zmienić?")}</div>
     </div>
-    ${r?`<div class="info-item settings-room"><b>Pokój ${esc(r.roomCode)}</b><div id="settingsQR" data-qr="${escAttr(joinURL(r))}" class="settings-qr"></div><div class="small center muted">Zeskanuj, aby wrócić do pokoju.</div></div><div class="manage-list">${activePlayers(r).map(p=>`<div class="manage-row">${sheepImg(p)}<div><b>${esc(p.name)}</b><div class="small muted">${esc(sheepType(p))} • ${p.connected||p.isBot?"online":"offline"}</div></div><button class="btn ghost" data-action="remove-player" data-id="${p.playerId}">Usuń</button></div>`).join("")}</div>`:""}
-    <div class="modal-actions">${r&&["ROUND","PROLOGUE"].includes(r.status)?`<button class="btn secondary" data-action="pause">${r.paused?"Wznów":"Pauza"}</button>`:""}${r&&r.status==="ROUND"&&r.match?.current&&!r.match.current.settlement?`<button class="btn secondary" data-action="abort-round">Pomiń pytanie</button>`:""}${r?`<button class="btn yellow" data-action="settings-new-game">↻ USTAW GRĘ OD NOWA</button>`:""}${r?`<button class="btn danger" data-action="settings-exit-menu">WYJDŹ DO MENU GŁÓWNEGO</button>`:""}<button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
+    <div class="settings-section dev-section countdown-sound-settings">
+      <div class="spread"><span class="setting-title">⏱ Piknięcie ostatnich 5 sekund ${infoTip("countdownTick","Jak działa sygnał końcówki?")}</span><label class="switch" aria-label="Włącz lub wyłącz piknięcia stopera"><input type="checkbox" data-tick-enabled ${runtime.audio.tickEnabled?"checked":""}><span></span></label></div>
+      <div class="spread timer-end-setting"><span class="setting-title">🔔 Dźwięk końca czasu 0:00 ${infoTip("timerEnd","Co dzieje się przy 0:00?")}</span><label class="switch" aria-label="Włącz lub wyłącz dźwięk końca czasu"><input type="checkbox" data-end-sound-enabled ${runtime.audio.endEnabled?"checked":""}><span></span></label></div>
+      <div class="spread tick-volume-label"><span>Głośność sygnałów stopera</span><b data-tick-volume-value>${Math.round(runtime.audio.tickVolume*100)}%</b></div><input type="range" min="0" max="100" step="5" value="${Math.round(runtime.audio.tickVolume*100)}" data-tick-volume="1">
+      <div class="small muted">Domyślnie: piknięcia i dźwięk 0:00 włączone • głośność 100%.</div>
+    </div>
+    <div class="developer-tool-card"><div><b>🎨 Ustawienia grafiki</b><div class="small muted">Skalowanie elementów tylko dla aktualnego ekranu gry.</div></div><button class="btn secondary" data-action="open-graphics-settings">OTWÓRZ</button></div>
+    <div class="row wrap developer-reset-row"><button class="btn ghost" data-action="developer-audio-reset">↺ DOMYŚLNE AUDIO DEWELOPERSKIE</button><span class="small muted">Muzyka etapu • sygnały 100%</span></div>
+    <div class="modal-actions"><button class="btn secondary" data-action="back-settings">← Wróć do ustawień</button><button class="btn" data-action="close-modal">Zamknij</button></div></div>`;
 }
 function currentVisualScreen(){
   const r=runtime.host.room;
@@ -2764,7 +2786,7 @@ function renderGraphicsSettingsModal(){
   const device=DEVICE_PROFILES[runtime.visual.device]?runtime.visual.device:"auto";
   const deviceOptions=Object.entries(DEVICE_PROFILES).map(([key,d])=>`<option value="${key}" ${device===key?"selected":""}>${esc(d.label)} — ${esc(d.hint)}</option>`).join("");
   const screenLabel={config:"ustawienia gry",lobby:"lobby",prologue:"prolog",round:"rozgrywka",final:"finał"}[screen]||screen;
-  return `<div class="modal card visual-settings-modal"><div class="visual-settings-heading"><div><h2>🎨 Ustawienia grafiki</h2><div class="small muted">Ekran: <b>${esc(screenLabel)}</b></div></div>${infoTip("visualSettings","Jak działają ustawienia grafiki?")}</div><div class="device-profile-box"><div class="spread"><b>📱 Dopasowanie do urządzenia</b><span class="device-profile-resolved">${esc(resolvedDeviceProfileLabel())}</span></div><select class="select" data-device-profile>${deviceOptions}</select><div class="small muted">Profil zmienia bazową skalę i zwartość układu. Tryb Automatycznie reaguje również na zmianę wielkości okna.</div></div><div class="visual-sliders">${defs.map(([key,label])=>{const rg=VISUAL_RANGES[key]||{min:70,max:140,step:5};return `<label class="visual-slider-row"><div><b>${esc(label)}</b><span data-visual-value="${key}">${runtime.visual[key]}%</span></div><input type="range" min="${rg.min}" max="${rg.max}" step="${rg.step}" value="${runtime.visual[key]}" data-visual-setting="${key}"></label>`;}).join("")}</div><div class="modal-actions"><button class="btn secondary" data-action="visual-reset">Przywróć domyślne dla tego ekranu</button><button class="btn" data-action="close-modal">GOTOWE</button></div></div>`;
+  return `<div class="modal card visual-settings-modal"><div class="visual-settings-heading"><div><h2>🎨 Ustawienia grafiki</h2><div class="small muted">Ekran: <b>${esc(screenLabel)}</b></div></div>${infoTip("visualSettings","Jak działają ustawienia grafiki?")}</div><div class="device-profile-box"><div class="spread"><b>📱 Dopasowanie do urządzenia</b><span class="device-profile-resolved">${esc(resolvedDeviceProfileLabel())}</span></div><select class="select" data-device-profile>${deviceOptions}</select><div class="small muted">Profil zmienia bazową skalę i zwartość układu. Tryb Automatycznie reaguje również na zmianę wielkości okna.</div></div><div class="visual-sliders">${defs.map(([key,label])=>{const rg=VISUAL_RANGES[key]||{min:70,max:140,step:5};return `<label class="visual-slider-row"><div><b>${esc(label)}</b><span data-visual-value="${key}">${runtime.visual[key]}%</span></div><input type="range" min="${rg.min}" max="${rg.max}" step="${rg.step}" value="${runtime.visual[key]}" data-visual-setting="${key}"></label>`;}).join("")}</div><div class="modal-actions"><button class="btn secondary" data-action="visual-reset">Przywróć domyślne dla tego ekranu</button><button class="btn secondary" data-action="back-developer-settings">← Ustawienia deweloperskie</button><button class="btn" data-action="close-modal">GOTOWE</button></div></div>`;
 }
 function afterModalRender(){document.querySelectorAll("[data-qr]").forEach(renderQRNode);}
 function showFloatingTooltip(source){
@@ -2778,7 +2800,7 @@ function showFloatingTooltip(source){
 }
 function hideFloatingTooltip(){document.getElementById("floating-info-tooltip")?.remove();}
 
-function pauseOverlay(phone=false){return `<div class="pause-overlay"><div class="overlay-box"><h1>⏸ Gra wstrzymana</h1><p>${phone?"Prowadzący zatrzymał grę. Twoje wpisane, ale niezatwierdzone treści pozostają na tym urządzeniu.":"Wznów grę w Ustawieniach."}</p></div></div>`;}
+function pauseOverlay(phone=false){return `<div class="pause-overlay"><div class="overlay-box"><h1>⏸ Gra wstrzymana</h1><p>${phone?"Prowadzący zatrzymał grę. Twoje wpisane, ale niezatwierdzone treści pozostają na tym urządzeniu.":"Możesz wznowić grę albo przejść do ustawień."}</p>${phone?"":`<div class="pause-actions"><button class="btn good" data-action="pause">▶ WZNÓW GRĘ</button><button class="btn secondary" data-action="open-settings">⚙ USTAWIENIA</button><button class="btn danger" data-action="settings-exit-menu">WYJDŹ DO MENU</button></div>`}</div></div>`;}
 function connectionOverlay(){return `<div class="connection-overlay"><div class="overlay-box"><h1>Łączenie ze Stadem…</h1><p>Nie wykonujemy żadnych ruchów bez potwierdzenia hosta.</p><button class="btn" data-action="player-reconnect">Połącz ponownie</button></div></div>`;}
 
 /* -------------------- AUDIO / POST-RENDER -------------------- */
@@ -2983,7 +3005,7 @@ function currentDefaultMusicTrack(){
   if(r?.status==="PROLOGUE")return 1;
   if(r?.status==="FINAL")return 5;
   if(r?.status==="ROUND")return MODE[r.config.mode]?.music||2;
-  return runtime.audio.defaultTrack||1;
+  return runtime.audio.defaultTrack||7;
 }
 function resolveMusicTrack(defaultTrack){const manual=clamp(+(runtime.audio.manualTrack||0),0,AUDIO_TRACK_COUNT);return manual||clamp(+defaultTrack,1,AUDIO_TRACK_COUNT);}
 function setManualMusicTrack(n){
@@ -3128,13 +3150,13 @@ function wolfResultText(r,c,w){
   const wolf=playerById(w.wolfPlayerId,r);if(w.skip)return `🐺 ${esc(wolf?.name||"Wilk")} ${w.timedOut?"nie zdążył z polowaniem — bez zmian.":"zrezygnował z polowania."}`;
   const target=playerById(w.targetPlayerId,r),pred=optionLabel(c,c.options.find(o=>o.optionId===w.predictedOptionId),true);
   if(w.neutral)return `🐺 Polowanie ${esc(wolf?.name||"Wilka")} na ${esc(target?.name||"Owcę")} jest neutralne — cel nie oddał głosu w czasie.`;
-  return w.hit?`🐺 ${esc(wolf?.name||"Wilk")} trafił głos ${esc(target?.name||"Owcy")} (${esc(pred)}): +1 dla Wilka, −${w.targetLoss} dla celu.`:`🐺 ${esc(wolf?.name||"Wilk")} chybił typ głosu ${esc(target?.name||"Owcy")}: −${Math.abs(w.delta)} pkt.`;
+  return w.hit?`🐺 ${esc(wolf?.name||"Wilk")} trafił głos ${esc(target?.name||"Owcy")} (${esc(pred)}): +1 pkt dla Wilka, −${w.targetLoss} pkt dla celu.`:`🐺 ${esc(wolf?.name||"Wilk")} chybił typ głosu ${esc(target?.name||"Owcy")}: −${Math.abs(w.delta)} pkt.`;
 }
 function wolfResultTextFromSnapshot(s,c,w){
   const wolf=s.players.find(p=>p.playerId===w.wolfPlayerId),target=s.players.find(p=>p.playerId===w.targetPlayerId);
   if(w.skip)return `🐺 ${wolf?.name||"Wilk"} ${w.timedOut?"nie zdążył z polowaniem — bez zmian.":"zrezygnował z polowania."}`;
   if(w.neutral)return `🐺 Polowanie ${wolf?.name||"Wilka"} na ${target?.name||"Owcę"} jest neutralne — cel nie oddał głosu w czasie.`;
-  return w.hit?`🐺 ${wolf?.name||"Wilk"} przewidział głos ${target?.name||"Owcy"}: Wilk +1, cel −${w.targetLoss}.`:`🐺 ${wolf?.name||"Wilk"} nie przewidział głosu ${target?.name||"Owcy"} i traci ${Math.abs(w.delta)} pkt.`;
+  return w.hit?`🐺 ${wolf?.name||"Wilk"} przewidział głos ${target?.name||"Owcy"}: Wilk +1 pkt, cel −${w.targetLoss} pkt.`:`🐺 ${wolf?.name||"Wilk"} nie przewidział głosu ${target?.name||"Owcy"} i traci ${Math.abs(w.delta)} pkt.`;
 }
 function toast(text,type="good"){const el=document.createElement("div");el.className=`toast ${type}`;el.textContent=text;toastRoot.appendChild(el);setTimeout(()=>el.remove(),4200);}
 
