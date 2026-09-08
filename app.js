@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.3.7";
+const APP_VERSION = "1.3.9";
 const PROTOCOL_VERSION = "stado-v2";
 const SCHEMA_VERSION = 1;
 const MAX_PLAYERS = 12;
@@ -42,8 +42,8 @@ const ALL_QUIZ_CATEGORY_KEYS = QUIZ_CATEGORIES.map(x=>x.key);
 const CONFIG_HELP = {
   timer: "Każda faza gry dostaje własny pełny limit czasu od 10 do 120 sekund. Jeśli gracz nie odda głosu w czasie, w tej rundzie dostaje 0 pkt. W fazie pisania po upływie czasu brakująca odpowiedź nie trafia do głosowania.",
   answers: "Rekomendacja: 3–4 Owce → 3 odpowiedzi, 5–8 → 4, 9–12 → 5. Jeżeli graczy jest mniej niż wybrana liczba odpowiedzi, gra automatycznie ogranicza liczbę odpowiedzi do liczby aktywnych Owiec.",
-  wolf: "Wilk to opcjonalna tajna minigra po oddaniu głosu w zwykłych rundach. Nie występuje w Quizie ani w rundach „Co zrobi dana Owca?”. Trafienie daje +1 pkt Wilkowi i może odebrać do 2 pkt celowi; pudło kosztuje Wilka 1 pkt; rezygnacja = 0.",
-  quiz: "Quiz ma zawsze 5 odpowiedzi i dokładnie jedną poprawną. Minimum 2 graczy. Przed pierwszym blokiem oraz po każdych 5 pytaniach Stado głosuje na kategorię kolejnych pytań, jeśli w ustawieniach wybrano co najmniej 2 kategorie. Każdy zaczyna z 1 Żetonem Wełny: można użyć go do punktacji ×2, dać +10 dodatkowych głosów przy wyborze kategorii albo zachować na finał za +1 pkt.",
+  wolf: "Jeśli Tryb Wilka jest włączony, w każdej zwykłej rundzie jedna losowo wybrana Owca zostaje Wilkiem. Po oddaniu własnego głosu Wilk może rozpocząć polowanie albo z niego zrezygnować. Jeśli poluje, wybiera jedną z pozostałych Owiec i próbuje przewidzieć, którą odpowiedź ta Owca zaznaczyła. Trafienie: Wilk +1 pkt, a upolowana Owca −2 pkt. Pudło: Wilk −1 pkt. Rezygnacja z polowania: bez zmian punktów. Jeśli wybrana Owca nie odda głosu przed końcem czasu, polowanie jest neutralne i nikt nie zyskuje ani nie traci punktów. Wilk nie występuje w Quizie ani w rundach „Co zrobi dana Owca?”.",
+  quiz: "Quiz ma zawsze 5 odpowiedzi i dokładnie jedną poprawną. Minimum 2 graczy. Przed pierwszym blokiem oraz po każdych 5 pytaniach Stado głosuje na kategorię kolejnych pytań, jeśli w ustawieniach wybrano co najmniej 2 kategorie. Każdy zaczyna z 2 Żetonami Wełny: każdy z nich można użyć do punktacji ×2, dać +10 dodatkowych głosów przy wyborze kategorii albo zachować na finał za +1 pkt.",
   quizCategories: "Domyślnie aktywne są wszystkie 10 kategorii. Przed blokiem pytań gra losuje maksymalnie 4 z wcześniej zaznaczonych kategorii i gracze wybierają jedną. Przy 2–4 zaznaczonych kategoriach do głosowania trafiają wszystkie. Jeśli zaznaczona jest tylko 1 kategoria, głosowanie jest pomijane.",
   modeWarmup: "Rozgrzewka: gra daje pytania i gotowe odpowiedzi. Najszybszy wariant bez pisania. W pytaniach typu „Która Owca?” nadal obowiązuje zwykła punktacja Stada.",
   modeFreestyle: "Freestyle: pytania daje gra, a wybrane Owce tworzą odpowiedzi. Autor najczęściej wybranej odpowiedzi może zdobyć +1 Żeton Wełny.",
@@ -804,7 +804,7 @@ function classifiedPlayers(room=runtime.host.room){ return activePlayers(room); 
 function minPlayersForMode(mode){return mode==="quiz"?2:MIN_PLAYERS;}
 function minPlayersForRoom(room=runtime.host.room){return minPlayersForMode(room?.config?.mode||runtime.configDraft.mode);}
 function actualAnswerCount(room=runtime.host.room){ return Math.min(room.config.answerCountRequested, activePlayers(room).length); }
-function startingTokens(room=runtime.host.room){return room?.config?.mode==="warmup"?2:1;}
+function startingTokens(room=runtime.host.room){return ["warmup","quiz"].includes(room?.config?.mode)?2:1;}
 function playerById(id,room=runtime.host.room){ return room?.players?.find(p=>p.playerId===id); }
 function sheepById(id){ return sheepMap.get(String(id)) || {id:"missing",name:"Owca",description:"",smallAvatar:"",bigAvatar:""}; }
 function currentAttempt(room=runtime.host.room){ return room?.match?.current || null; }
@@ -2287,7 +2287,7 @@ function renderConfig(room=null){
 }
 
 function renderConfigScoring(cfg){
-  if(cfg.mode==="quiz")return `<div class="config-score-groups one"><div class="config-score-group"><h4>🧠 Quiz</h4><div class="config-score-row"><b>✅ +2 pkt</b><span>poprawna odpowiedź</span></div><div class="config-score-row"><b>❌ 0 pkt</b><span>błędna / brak</span></div><div class="config-score-row"><b>🧶 ×2</b><span>poprawna odpowiedź = +4 pkt</span></div><div class="config-score-row"><b>🗳 🧶 +10 głosów</b><span>przy wyborze kategorii</span></div><div class="config-score-row"><b>🧶 +1 pkt</b><span>za zachowany Żeton Wełny w finale</span></div><div class="config-score-row"><b>START: 1 Żeton Wełny</b><span>wybierasz: kategoria, ×2 albo finał</span></div></div></div>`;
+  if(cfg.mode==="quiz")return `<div class="config-score-groups one"><div class="config-score-group"><h4>🧠 Quiz</h4><div class="config-score-row"><b>✅ +2 pkt</b><span>poprawna odpowiedź</span></div><div class="config-score-row"><b>❌ 0 pkt</b><span>błędna / brak</span></div><div class="config-score-row"><b>🧶 ×2</b><span>poprawna odpowiedź = +4 pkt</span></div><div class="config-score-row"><b>🗳 🧶 +10 głosów</b><span>przy wyborze kategorii</span></div><div class="config-score-row"><b>🧶 +1 pkt</b><span>za zachowany Żeton Wełny w finale</span></div><div class="config-score-row"><b>START: 2 Żetony Wełny</b><span>każdy możesz użyć: kategoria, ×2 albo finał</span></div></div></div>`;
   const author=cfg.mode!=="warmup"?`<div class="config-score-row"><b>✍️ +1 Żeton Wełny</b><span>autor najczęściej wybranej odpowiedzi — tylko gdy gracze piszą odpowiedzi</span></div>`:"";
   const wolf=cfg.wolfEnabled?`<div class="config-score-row"><b>🐺</b><span>zwykłe rundy: trafienie +1 pkt / cel −2 pkt • pudło −1 pkt</span></div>`:"";
   return `<div class="config-score-groups"><div class="config-score-group"><h4>🐑 Co robi Stado? / Która Owca?</h4><div class="config-score-row"><b>+2 pkt</b><span>największe Stado</span></div><div class="config-score-row"><b>+1 pkt</b><span>remis największych Stad</span></div><div class="config-score-row"><b>🖤 +3 pkt</b><span>jedyna samotna Czarna Owca</span></div><div class="config-score-row"><b>🧶 ×2</b><span>podwaja punkty za Twój głos</span></div>${author}${wolf}</div><div class="config-score-group accent"><h4>🔎 Co zrobi dana Owca?</h4><div class="config-score-row"><b>🔎 +1 pkt</b><span>Owca pod lupą — zawsze</span></div><div class="config-score-row"><b>🎯 +2 pkt</b><span>trafisz jej wybór</span></div><div class="config-score-row"><b>❌ 0 pkt</b><span>pudło</span></div><div class="config-score-row"><b>🧶 ×2</b><span>trafienie = +4 pkt</span></div></div></div>`;
